@@ -63,7 +63,7 @@ def model_check(path):
     from spark_mlx_llm.generation import generate
     from spark_mlx_llm.loader import load
 
-    model, tokenizer = load(path)
+    model, tokenizer = load(path, tokenizer_config={"trust_remote_code": False})
     prompt = "你好，请用一句话介绍自己。"
     if tokenizer.has_chat_template:
         prompt = tokenizer.apply_chat_template(
