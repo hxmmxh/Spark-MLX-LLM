@@ -3,8 +3,9 @@
 [Project overview](../../README.md) · [简体中文](../zh/conversion.md)
 
 `spark-mlx-convert` converts local Spark BF16 or compressed-tensors INT4
-checkpoints to MLX format. Conversion runs on CPU in chunks, without loading
-the model for inference. Its implementation depends only on NumPy.
+checkpoints and Spark target GGUF files to MLX format. Conversion runs on CPU
+in chunks without loading the model for inference. Safetensors conversion
+requires NumPy only; GGUF decoding uses the `gguf` package.
 
 ## 1. Supported inputs
 
@@ -14,13 +15,21 @@ hidden dimensions, attention heads, and vocabulary size from the configuration.
 Download the published Spark-X2.6-4B BF16 or INT4 model using the links in the
 [README](../../README.md#1-download-a-model).
 
-**Convert compressed-tensors checkpoints before using them with
-`spark-mlx-generate`, `spark-mlx-chat`, or `spark-mlx-server`.** Pass the converted
-output directory to `--model`.
+**Ordinary and DSpark inference accept local original checkpoints directly.**
+BF16/MLX directories load directly; compressed-tensors INT4 defaults to in-memory
+preparation, while target GGUFs are converted and cached on first loading.
+Manual conversion is optional. Use `--model-cache` or Python's `model_cache=True`
+to enable disk caching for INT4 directories. When enabled, caches default to
+`~/.cache/spark-mlx-llm/models`. Configure the root using
+`--model-cache-dir /path/to/cache`, the Python loading argument
+`model_cache_dir`, or `SPARK_MLX_MODEL_CACHE`. Explicit CLI/Python arguments
+override the environment variable, which overrides the default.
 
-If the input contains floating-point `draft_model.*` tensors, the converter
+If the input contains floating-point or this project's quantized `draft_model.*` tensors, the converter
 preserves their names, data, and draft configuration without quantizing them.
-The inference examples in this guide cover models without draft weights.
+Alternatively, `--draft-source` attaches a standalone Safetensors draft directory
+or the [public BF16 draft GGUF](https://www.modelscope.cn/models/XHToken/Spark-X2.6-4B-DSpark-GGUF/files).
+Draft GGUF inputs must be floating point; target GGUF support is described below.
 
 ## 2. Command-line conversion
 
@@ -67,6 +76,84 @@ To retain BF16 main-model weights, use `--quantization none` with a BF16 source:
 contain nor be contained by the source directory. Conversion never overwrites
 the source or an existing output directory. `--chunk-rows` defaults to `256`;
 smaller values reduce temporary memory use during CPU conversion.
+
+### Load original INT4 without disk preparation
+
+Inference entry points default to preparing original compressed-tensors INT4 in
+memory. Integer codes are repacked in row chunks into in-memory MLX affine arrays;
+no converted cache or temporary model file is written. Python's `load(path)` and
+`load_pair(path)` use the same default for INT4 directories.
+Validation, scale/zero-point rounding and tied BF16 head handling match disk
+conversion. Every startup repeats preparation and needs temporary memory.
+Cache directory options and environment settings are ignored in this mode.
+Ordinary chat/server require a single process; target GGUF is not yet supported.
+Explicit convert/export-draft commands still save their requested outputs.
+
+### Target GGUF import
+
+```sh
+.venv/bin/spark-mlx-convert \
+    --source /path/to/Spark-X2.6-4B-Q4_K_M.gguf \
+    --output /path/to/Spark-X2.6-4B-from-GGUF-MLX
+```
+
+Import requires the Spark `spark2_5` architecture and BPE tokenizer with an
+embedded chat template. Supported tensor types are FP32/FP16/BF16, Q4_0/Q4_1,
+Q4_K/Q5_K/Q6_K, and Q8_0, covering the published mixed Q4_K_M checkpoint.
+Rows are decoded to BF16 and processed by the existing MLX conversion rules;
+no complete intermediate BF16 checkpoint is written. Vocabulary, merges,
+special tokens, and the template are exported automatically.
+
+The default output uses this project's mixed W4/G32 + W8 policy. Explicit
+`--quantization none` retains decoded BF16 weights instead. GGUF import
+requantizes and does not preserve GGUF integer codes or promise bitwise
+equivalence with llama.cpp. Automatic inference caches use the default mixed
+policy with the `native` backend configuration; use explicit conversion for
+other export policies.
+
+### Merge a separate target and draft
+
+```sh
+.venv/bin/spark-mlx-convert \
+    --source /path/to/Spark-X2.6-4B-INT4 \
+    --draft-source /path/to/Spark-X2.6-4B-DSpark.gguf \
+    --output /path/to/Spark-X2.6-4B-DSpark-MLX
+```
+
+`--draft-source` can also point to a standalone Safetensors directory containing
+`config.json` and floating-point weights, or INT8/INT4 weights exported by this
+project. Draft integer codes and coefficients are preserved when merging.
+If `--source` is already MLX affine
+quantized, target weights, scales, and biases are copied without requantization;
+the manifest records `quantization="preserved"`. For inputs already containing
+a draft, omit `--draft-source` and convert the merged checkpoint directly.
+Both draft formats validate geometry, taps, tensor shapes, and available token
+ID mappings. GGUF BF16/FP32 precision is preserved, Q/K/V are concatenated, and
+shared embedding is recorded in the configuration. `--inspect` accepts separate
+drafts too; the output must be disjoint from both sources.
+
+To load without exporting a merged directory, generation and the DSpark HTTP
+service accept `--draft-model`. Python uses
+`load_pair(target_path, draft_path=draft_path)`; see the
+[DSpark examples](../../README.md#dspark-models).
+
+Conversion preserves the draft's stored precision. Floating drafts default to
+INT8 quantization during loading from the same BF16 GGUF, standalone Safetensors,
+or merged checkpoint. Use `--draft-quantization int4` to apply INT4/G32 to
+QKV/FFN and per-channel INT8 to other major projections. This is a generation/
+serving option, not a convert option, and preserves target quantization.
+
+To save a quantized draft ahead of time, run
+`python -m spark_mlx_llm.dspark export-draft --model TARGET --draft-model DRAFT --draft-quantization int8 --output NEW_DIRECTORY`
+(`int4` also works). Later use `--draft-model NEW_DIRECTORY` or
+`--draft-source NEW_DIRECTORY`. Quantized drafts retain their saved format by
+default, restoring integer codes, FP32 W8 scales, and
+BF16 W4 scales/offsets without startup requantization. The versioned format and
+module rules are recorded in `config.json` under `draft_quantization`; unrelated
+quantization layouts are not assumed compatible.
+
+To preserve a floating draft's precision, explicitly pass
+`--draft-quantization checkpoint` or `bf16`.
 
 ## 3. Default mixed-precision scheme
 

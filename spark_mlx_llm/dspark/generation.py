@@ -76,6 +76,8 @@ def stream_generate(
     seed=0,
     prefill_chunk_size=512,
     apply_chat_template=True,
+    enable_thinking=True,
+    reasoning_effort="low",
 ):
     """Yield TokenEvent values followed by exactly one GenerationResult.
 
@@ -113,7 +115,13 @@ def stream_generate(
         raise ValueError("Confidence scheduling requires a confidence head")
     if seed is not None:
         mx.random.seed(seed)
-    ids = encode_prompt(pair, prompt, apply_chat_template=apply_chat_template)
+    ids = encode_prompt(
+        pair,
+        prompt,
+        apply_chat_template=apply_chat_template,
+        enable_thinking=enable_thinking,
+        reasoning_effort=reasoning_effort,
+    )
     if max_new_tokens == 0:
         yield GenerationResult((), "", len(ids), "length", 0, 0, 0, 0, 0, 0, 0, 0, 0)
         return

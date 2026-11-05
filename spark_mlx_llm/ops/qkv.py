@@ -5,14 +5,12 @@ from functools import cache
 import mlx.core as mx
 from mlx import nn
 
+from ..extension import get_extension
 from .linear import AffineParameters, LinearConfig
 
 __all__ = ["dispatch_qkv"]
 
-try:
-    from spark_mlx_ext import spark_qkv_rope
-except ImportError:
-    spark_qkv_rope = None
+spark_qkv_rope = getattr(get_extension(), "spark_qkv_rope", None)
 
 
 def dispatch_qkv(

@@ -38,6 +38,7 @@ __all__ = [
     "read_safetensors_header",
     "sample_draft",
     "sampled_accept",
+    "save_draft",
     "spark_layer_specs",
     "stream_generate",
     "validate_draft_shapes",
@@ -53,6 +54,7 @@ _RUNTIME_EXPORTS = {
     "SamplingOptions": "sampling",
     "DraftPrediction": "sampling",
     "sample_draft": "sampling",
+    "save_draft": "draft_storage",
 }
 
 

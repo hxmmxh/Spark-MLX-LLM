@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 BASE_URL = "http://127.0.0.1:8080"
 TIMEOUT = 300
 PAYLOAD = {
-    "model": "default_model",
+    "model": "spark-x2.6-4b",
     "prompt": "春天来了，",
     "max_tokens": 128,
     "temperature": 0.0,

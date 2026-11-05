@@ -1,8 +1,19 @@
 """Prompt encoding and EOS configuration shared by generation and presentation."""
 
 
-def encode_prompt(pair, prompt, *, apply_chat_template=True):
+def encode_prompt(
+    pair,
+    prompt,
+    *,
+    apply_chat_template=True,
+    enable_thinking=True,
+    reasoning_effort="low",
+):
     """Encode text or validate supplied token IDs against the target vocabulary."""
+    if type(enable_thinking) is not bool:
+        raise ValueError("enable_thinking must be a boolean")
+    if reasoning_effort not in ("low", "high"):
+        raise ValueError("reasoning_effort must be low or high")
     if isinstance(prompt, str):
         if pair.tokenizer is None:
             raise ValueError("String prompts need a loaded tokenizer")
@@ -11,6 +22,8 @@ def encode_prompt(pair, prompt, *, apply_chat_template=True):
                 [{"role": "user", "content": prompt}],
                 tokenize=False,
                 add_generation_prompt=True,
+                enable_thinking=enable_thinking,
+                reasoning_effort=reasoning_effort,
             )
         ids = pair.tokenizer.encode(prompt, add_special_tokens=False)
     else:

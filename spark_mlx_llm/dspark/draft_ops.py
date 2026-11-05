@@ -10,6 +10,8 @@ import math
 import mlx.core as mx
 from mlx import nn
 
+from ..extension import get_extension
+
 
 @mx.compile
 def _compiled_dense_residual_ffn(
@@ -214,7 +216,7 @@ class MarkovBiasCache:
 
     def activate(self):
         """Rebind a prepared immutable cache without rebuilding any tensor."""
-        import spark_mlx_ext as ext
+        operation = getattr(get_extension(), "cached_markov_bias", None)
 
         if not self._restored:
             if self._head.step_bias is not self._wrapper:
@@ -247,7 +249,8 @@ class MarkovBiasCache:
 
         def step_bias(ids):
             if (
-                head.markov_w1 is not self._embedding_module
+                not callable(operation)
+                or head.markov_w1 is not self._embedding_module
                 or head.markov_w2 is not self._projection_module
                 or head.markov_w1.weight is not embedding
                 or head.markov_w2.weight is not projection
@@ -256,7 +259,7 @@ class MarkovBiasCache:
                 is not type(head).prev_embeddings
             ):
                 return original(ids)
-            return ext.cached_markov_bias(
+            return operation(
                 ids.astype(mx.int32), embedding, projection, self.cache, self.lookup
             )
 
@@ -326,10 +329,11 @@ def _draft_context_projection(context, projection, q_size, kv_size):
             return mx.addmm(projection.bias[q_size:], context, weight.T)
         return context @ weight.T
 
-    from .draft_quantization import DerivedDraftPerChannelW8Linear
+    from .draft_quantization import DerivedDraftPerChannelW8Linear, RuntimeDraftW8Linear
 
     if not (
-        type(projection) is DerivedDraftPerChannelW8Linear
+        type(projection) in (DerivedDraftPerChannelW8Linear, RuntimeDraftW8Linear)
+        and getattr(projection, "_native_kernels", True)
         and mx.default_device() == mx.gpu
         and mx.metal.is_available()
         and context.shape[-1] % 32 == 0
@@ -347,10 +351,15 @@ def _draft_context_projection(context, projection, q_size, kv_size):
         )
     ):
         return None
-    import spark_mlx_ext as ext
-
+    ext = get_extension()
+    operation = getattr(ext, "w8a16_multirow", None)
+    available = getattr(ext, "is_w8a8_available", None)
+    if not callable(operation) or projection._variant == "nax" and (
+        not callable(available) or not available()
+    ):
+        return None
     weight, scales = projection.weight[q_size:], projection.scales[q_size:]
-    value = ext.w8a16_multirow(
+    value = operation(
         context,
         weight,
         scales,

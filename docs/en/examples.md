@@ -190,7 +190,7 @@ curl --fail-with-body http://127.0.0.1:8080/v1/models
 .venv/bin/python example/http_completions.py
 ```
 
-`BASE_URL` must not include `/v1`. The request's `model="default_model"`
+`BASE_URL` must not include `/v1`. The request's `model="spark-x2.6-4b"`
 selects the model supplied when starting the server; the client does not
 need a local model directory. `http_chat.py` requests up to 2048 tokens by
 default, and `http_completions.py` requests 128. Both set temperature to 0.
@@ -198,6 +198,13 @@ These request fields override server startup values. The chat example
 disables thinking in `chat_template_kwargs`; edit `enable_thinking` and
 `reasoning_effort` there to enable it, or remove the entire
 `chat_template_kwargs` field to inherit the server defaults.
+
+Set the client-facing name explicitly with `--served-model-name spark-x2.6-4b`
+and use the same value in the request's `model` field. To start DSpark through
+the shared entry point, use
+`spark-mlx-server --model TARGET --draft-model DRAFT --served-model-name spark-x2.6-4b`.
+Local merged checkpoints also select DSpark automatically. Run
+`spark-mlx-server --draft-model DRAFT --help` for DSpark serving options.
 
 HTTP answer text is written to stdout. Thinking text, the finish reason,
 and token usage for non-streaming responses are written to stderr.
@@ -212,7 +219,7 @@ the client.
 
 Generate, chat, and server share
 [GenerationConfig](../../spark_mlx_llm/generation.py) for sampling, output
-length, and thinking settings. These are the interface defaults; the example
+length, and thinking settings. These are the CLI defaults; the example
 scripts can explicitly override them.
 
 | Configuration field | Command-line option | Default |
@@ -222,9 +229,13 @@ scripts can explicitly override them.
 | `top_p` | `--top-p` | `1.0` |
 | `top_k` | `--top-k` | `0` |
 | `min_p` | `--min-p` | `0.0` |
-| `enable_thinking` | `--thinking` / `--no-thinking` | Preserve the model template default |
-| `reasoning_effort` | `--reasoning-effort low/high` | Preserve the model template default |
+| `enable_thinking` | `--thinking` / `--no-thinking` | `True`, thinking enabled |
+| `reasoning_effort` | `--reasoning-effort low/high` | `low` |
 | `chat_template_kwargs` | `--chat-template-args '{...}'` | Empty object; forward other template arguments |
+
+A directly constructed Python `GenerationConfig` preserves the model template
+defaults; use `GenerationConfig.cli_defaults()` to reuse the CLI's low-effort
+thinking settings.
 
 All three commands accept `--config example/inference.json`, but the commands
 do not load that file automatically. File paths are relative to the working
@@ -328,15 +339,15 @@ The four command implementations live in
 | Entry point | Loading and execution | Configuration scope |
 | --- | --- | --- |
 | Python `load()` + `generate()` / `stream_generate()`, and `spark-mlx-generate` | Project loader and generation wrappers, with generation delegated to MLX LM | Apply Spark KV and prompt chunking defaults |
-| `spark-mlx-chat` / `spark-mlx-server` | Register the model, then use upstream loading, caching, generation, and serving with shared inference settings | Share sampling and thinking settings; retain their upstream KV behavior |
+| `spark-mlx-chat` / `spark-mlx-server` | Use upstream execution normally; a matching draft or local merged checkpoint selects this project's DSpark implementation | Share sampling and thinking settings; DSpark serving allows independent target/draft sampling |
 | `spark-mlx-convert` / `convert_to_mlx()` | Project CPU conversion implementation | Offline conversion without importing MLX inference modules |
 
 [registration.py](../../spark_mlx_llm/registration.py) prefers an installed
 `mlx_lm.models.spark2_5`. If absent, it registers this project's model in the
-current process without modifying `mlx_lm` on disk. Chat adapts the upstream
-interactive loop; server forwards settings upstream and retains MLX LM's HTTP
-routes, response formats, and scheduling. Neither entry point calls this
-package's `load()` or generation wrappers.
+current process without modifying `mlx_lm` on disk. In ordinary mode, chat adapts
+the upstream interactive loop and server retains MLX LM's HTTP routes, response
+formats, and scheduling. DSpark mode uses this project's `load_pair()` and DSpark
+generation APIs, with chat completions and SSE streaming for HTTP serving.
 
 The project's [load()](../../spark_mlx_llm/loader.py) explicitly selects the
 Spark model and accepts `~/...` local paths or `org/model` repository IDs.

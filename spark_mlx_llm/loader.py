@@ -3,11 +3,17 @@ from typing import Any
 
 import mlx.core as mx
 from huggingface_hub import snapshot_download
+from mlx import nn
 from mlx.utils import tree_map_with_path
 from mlx_lm.tokenizer_utils import load as load_tokenizer
 from mlx_lm.utils import load_model
 
 from .model import Model, ModelArgs
+from .model_source import (
+    load_uncached_model_source,
+    model_cache_enabled,
+    prepare_model_source,
+)
 from .ops.linear import LinearConfig, QuantizedProjections
 from .ops.sdpa import SDPAConfig
 
@@ -27,7 +33,7 @@ MODEL_ALLOW_PATTERNS = [
 def _resolve_model_path(path_or_repo: str | Path, revision: str | None):
     model_path = Path(path_or_repo).expanduser()
     if model_path.exists():
-        if not model_path.is_dir():
+        if not model_path.is_dir() and model_path.suffix.lower() != ".gguf":
             raise NotADirectoryError(f"Model path must be a directory: {model_path}")
         return model_path
     if (
@@ -62,6 +68,31 @@ def _load_tokenizer(model_path, tokenizer_config, eos_token_ids):
     )
 
 
+def _load_model_weights(config, weights, *, model_config, lazy, strict):
+    config = {**config, **model_config}
+    model = Model(ModelArgs.from_dict(config))
+    weights = model.sanitize(weights)
+    quantization = config["quantization"]
+
+    def predicate(name, module):
+        if name in quantization:
+            return quantization[name]
+        return hasattr(module, "to_quantized") and name + ".scales" in weights
+
+    nn.quantize(
+        model,
+        group_size=quantization["group_size"],
+        bits=quantization["bits"],
+        mode=quantization.get("mode", "affine"),
+        class_predicate=predicate,
+    )
+    model.eval()
+    model.load_weights(list(weights.items()), strict=strict)
+    if not lazy:
+        mx.eval(model.parameters())
+    return model, config
+
+
 def load(
     path_or_repo: str | Path,
     *,
@@ -74,7 +105,12 @@ def load(
     w8_qmv_backend: str | None = None,
     w4_qmv_backend: str | None = None,
     return_config: bool = False,
+    model_cache_dir: str | Path | None = None,
+    model_cache: bool | None = None,
 ):
+    """Prepare INT4 in memory by default; target GGUF uses disk conversion caching."""
+    if model_cache is not None and type(model_cache) is not bool:
+        raise ValueError("model_cache must be a boolean or None")
     dtypes = {"float32": mx.float32, "bfloat16": mx.bfloat16}
     if dtype is not None and (not isinstance(dtype, str) or dtype not in dtypes):
         raise ValueError(f"Unsupported dtype {dtype!r}; choose from {sorted(dtypes)}")
@@ -86,13 +122,23 @@ def load(
     LinearConfig.validate_values(model_config)
     SDPAConfig.validate_values(model_config)
     model_path = _resolve_model_path(path_or_repo, revision)
-    model, config = load_model(
-        model_path,
-        lazy=lazy,
-        strict=strict,
-        model_config=model_config,
-        get_model_classes=_get_model_classes,
-    )
+    model_cache = model_cache_enabled(model_path, model_cache)
+    prepared = load_uncached_model_source(model_path) if not model_cache else None
+    if prepared is not None:
+        config, weights = prepared
+        model, config = _load_model_weights(
+            config, weights, model_config=model_config, lazy=lazy, strict=strict
+        )
+    else:
+        if model_cache:
+            model_path = prepare_model_source(model_path, cache_dir=model_cache_dir)
+        model, config = load_model(
+            model_path,
+            lazy=lazy,
+            strict=strict,
+            model_config=model_config,
+            get_model_classes=_get_model_classes,
+        )
     if dtype is not None:
         target_dtype = dtypes[dtype]
         scale_paths = QuantizedProjections.scale_paths(model)
@@ -118,3 +164,23 @@ def load(
     if return_config:
         return model, tokenizer, config
     return model, tokenizer
+
+
+def load_without_model_cache(path, *, adapter_path=None, **kwargs):
+    """Upstream chat/server loader adapter for the no-cache CLI mode."""
+    model, tokenizer, config = load(
+        path,
+        model_cache=False,
+        return_config=True,
+        **{k: v for k, v in kwargs.items() if k != "return_config"},
+    )
+    if adapter_path is not None:
+        from mlx_lm.utils import load_adapters
+
+        model = load_adapters(model, adapter_path)
+        model.eval()
+    return (
+        (model, tokenizer, config)
+        if kwargs.get("return_config")
+        else (model, tokenizer)
+    )

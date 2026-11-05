@@ -160,8 +160,12 @@ curl --fail-with-body http://127.0.0.1:8080/v1/models
 .venv/bin/python example/http_completions.py
 ```
 
-`BASE_URL` 不含 `/v1`。请求中的 `model="default_model"` 使用服务启动时指定的模型，
+`BASE_URL` 不含 `/v1`。请求中的 `model="spark-x2.6-4b"` 使用服务启动时指定的模型，
 客户端无需本地模型目录。
+服务可通过 `--served-model-name spark-x2.6-4b` 显式配置此名称，客户端的 `model` 应与之保持一致。
+`spark-mlx-server --model TARGET --draft-model DRAFT --served-model-name spark-x2.6-4b`
+可直接启动 DSpark 服务；本地合并模型也会自动使用 DSpark。DSpark 参数可通过
+`spark-mlx-server --draft-model DRAFT --help` 查看。
 `http_chat.py` 默认请求 2048 tokens，`http_completions.py` 默认请求 128 tokens，
 温度均为 0；这些请求字段会覆盖服务启动值。聊天示例在 `chat_template_kwargs`
 中关闭思考；修改其中的 `enable_thinking` 和 `reasoning_effort` 可开启思考，
@@ -177,7 +181,7 @@ HTTP 最终回答写到 stdout，思考文本、结束原因和普通响应的 t
 
 `generate`、`chat` 和 `server` 共用
 [GenerationConfig](../../spark_mlx_llm/generation.py) 管理采样、输出长度和思考设置。
-以下是接口本身的默认值；示例脚本可以显式覆盖它们。
+以下是命令行入口的默认值；示例脚本可以显式覆盖它们。
 
 | 配置字段 | 命令行参数 | 默认值 |
 | --- | --- | --- |
@@ -186,9 +190,12 @@ HTTP 最终回答写到 stdout，思考文本、结束原因和普通响应的 t
 | `top_p` | `--top-p` | `1.0` |
 | `top_k` | `--top-k` | `0` |
 | `min_p` | `--min-p` | `0.0` |
-| `enable_thinking` | `--thinking` / `--no-thinking` | 不覆盖模型模板 |
-| `reasoning_effort` | `--reasoning-effort low/high` | 不覆盖模型模板 |
+| `enable_thinking` | `--thinking` / `--no-thinking` | `True`，默认开启思考 |
+| `reasoning_effort` | `--reasoning-effort low/high` | `low` |
 | `chat_template_kwargs` | `--chat-template-args '{...}'` | 空对象，透传其他模板参数 |
+
+Python 中直接构造的 `GenerationConfig` 默认不覆盖模型模板；
+`GenerationConfig.cli_defaults()` 可复用命令行的 low 思考默认值。
 
 三个命令都接受 `--config example/inference.json`，但命令本身不会自动加载该文件。
 文件路径相对于当前工作目录；示例 shell 脚本显式传入按脚本位置定位的配置路径。
@@ -278,13 +285,14 @@ Spark 示例模型的模板支持 `enable_thinking=True` 配合 `reasoning_effor
 | 入口 | 模型加载与执行路径 | 配置范围 |
 | --- | --- | --- |
 | Python `load()` + `generate()` / `stream_generate()`，以及 `spark-mlx-generate` | 本项目加载器和生成包装，再委托 MLX LM 执行生成 | 应用 Spark KV 与分块默认值 |
-| `spark-mlx-chat` / `spark-mlx-server` | 注册模型后使用上游加载、缓存、生成与服务能力，并适配公共推理设置 | 共享采样与思考设置，保留各自上游 KV 行为 |
+| `spark-mlx-chat` / `spark-mlx-server` | 普通模式使用上游能力；传入配套草稿或本地合并模型时使用本项目 DSpark 实现 | 共享采样与思考设置；DSpark 服务支持独立配置两侧采样 |
 | `spark-mlx-convert` / `convert_to_mlx()` | 本项目 CPU 转换实现 | 离线转换，不导入 MLX 推理模块 |
 
 [registration.py](../../spark_mlx_llm/registration.py) 优先使用已安装的
 `mlx_lm.models.spark2_5`；缺失时仅在当前进程中注册本项目模型，不修改磁盘上的
-`mlx_lm`。chat 适配上游交互循环；server 将参数转交上游，HTTP 路由、响应格式和调度
-沿用 MLX LM。这两个入口不调用本包的 `load()` 或生成包装函数。
+`mlx_lm`。普通模式下，chat 适配上游交互循环，server 将参数转交上游，HTTP 路由、
+响应格式和调度沿用 MLX LM。DSpark 模式使用本项目的 `load_pair()` 与 DSpark 生成接口，
+服务提供聊天与 SSE 流式响应。
 
 本项目的 [load()](../../spark_mlx_llm/loader.py) 明确使用 Spark 模型，支持 `~/...`
 本地目录和 `org/model` 仓库 ID；显式本地路径不存在时直接报错。

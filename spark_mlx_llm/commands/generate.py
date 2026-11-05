@@ -5,6 +5,7 @@ from mlx_lm.sample_utils import make_sampler
 
 from ..generation import GenerationConfig, generate
 from ..loader import load
+from ..model_source import add_model_cache_arguments, model_cache_enabled
 from ..ops.linear import LinearConfig
 from ..ops.sdpa import SDPAConfig
 
@@ -15,8 +16,13 @@ def build_parser():
     parser = argparse.ArgumentParser(
         description="Generate text with Spark2_5", allow_abbrev=False
     )
-    parser.add_argument("--model", required=True, help="Local path or HF repo")
+    parser.add_argument(
+        "--model",
+        required=True,
+        help="BF16/INT4/MLX directory, Spark target GGUF, or HF repo",
+    )
     parser.add_argument("--prompt", "-p", default="你好")
+    add_model_cache_arguments(parser)
     GenerationConfig.add_arguments(parser)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
@@ -75,6 +81,8 @@ def main():
 
     model, tokenizer = load(
         args.model,
+        model_cache_dir=args.model_cache_dir,
+        model_cache=model_cache_enabled(args.model, args.model_cache),
         dtype=None if args.dtype == "checkpoint" else args.dtype,
         w8_qmv_backend=args.w8_qmv_backend,
         w4_qmv_backend=args.w4_qmv_backend,
@@ -92,7 +100,10 @@ def main():
             add_generation_prompt=True,
             **inference.template_kwargs(),
         )
-    elif inference.template_kwargs():
+    elif inference.template_kwargs() not in (
+        {},
+        GenerationConfig.cli_defaults().template_kwargs(),
+    ):
         parser.error("The tokenizer has no chat template for the requested settings")
 
     sampler = make_sampler(**inference.sampler_kwargs())

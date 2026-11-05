@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import DSparkConfig
+from .quantization_format import draft_quantization_config, module_spec
 
 _DTYPE_BYTES = {
     "BOOL": 1,
@@ -204,15 +205,22 @@ def inspect_checkpoint(path: str | Path) -> CheckpointInfo:
     return result
 
 
-def validate_draft_shapes(config: DSparkConfig, checkpoint: CheckpointInfo) -> None:
+def validate_draft_shapes(
+    config: DSparkConfig,
+    checkpoint: CheckpointInfo,
+    *,
+    shared_embedding=False,
+    quantization=None,
+) -> None:
     """Validate Spark draft tensor names and shapes; leave readout binding unresolved."""
     h, intermediate = config.hidden_size, config.intermediate_size
     shapes = {
-        "embed_tokens.weight": (config.vocab_size, h),
         "fc.weight": (h, config.context_input_size),
         "hidden_norm.weight": (h,),
         "norm.weight": (h,),
     }
+    if not shared_embedding:
+        shapes["embed_tokens.weight"] = (config.vocab_size, h)
     if config.fc_norm:
         for i in range(len(config.target_layer_ids)):
             shapes[f"fc_norm.{i}.weight"] = (h,)
@@ -258,6 +266,33 @@ def validate_draft_shapes(config: DSparkConfig, checkpoint: CheckpointInfo) -> N
     draft = checkpoint.draft_tensors
     if "lm_head.weight" in draft:
         shapes["lm_head.weight"] = (config.draft_vocab_size, h)
+    schema = draft_quantization_config(quantization)
+    modules = {
+        name.removesuffix(".weight"): spec
+        for name in shapes
+        if name.endswith(".weight")
+        and (spec := module_spec(name.removesuffix(".weight"), schema["policy"]))
+    }
+    if modules != schema["modules"]:
+        raise ValueError("Draft quantization module map does not match the profile")
+    dtypes = {}
+    for name, spec in modules.items():
+        rows, columns = shapes[name + ".weight"]
+        if spec["bits"] == 8:
+            shapes[name + ".scales"] = (rows,)
+            dtypes.update({name + ".weight": "I8", name + ".scales": "F32"})
+        else:
+            if columns % 32:
+                raise ValueError(f"{name}: INT4/G32 requires K divisible by 32")
+            shapes[name + ".weight"] = (rows, columns // 8)
+            shapes[name + ".scales"] = shapes[name + ".biases"] = (rows, columns // 32)
+            dtypes.update(
+                {
+                    name + ".weight": "U32",
+                    name + ".scales": "BF16",
+                    name + ".biases": "BF16",
+                }
+            )
     missing = sorted(shapes.keys() - draft.keys())
     unexpected = sorted(draft.keys() - shapes.keys())
     wrong_shapes = {
@@ -265,8 +300,14 @@ def validate_draft_shapes(config: DSparkConfig, checkpoint: CheckpointInfo) -> N
         for name, shape in shapes.items()
         if name in draft and draft[name].shape != shape
     }
-    if missing or unexpected or wrong_shapes:
+    wrong_dtypes = {
+        name: tensor.dtype
+        for name, tensor in draft.items()
+        if tensor.dtype
+        not in ((dtypes[name],) if name in dtypes else ("BF16", "F16", "F32"))
+    }
+    if missing or unexpected or wrong_shapes or wrong_dtypes:
         raise ValueError(
             f"Draft tensor mismatch: missing={missing}, unexpected={unexpected}, "
-            f"wrong_shapes={wrong_shapes}"
+            f"wrong_shapes={wrong_shapes}, wrong_dtypes={wrong_dtypes}"
         )

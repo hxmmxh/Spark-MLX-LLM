@@ -3,7 +3,8 @@
 [项目首页](../../README.zh.md) · [English](../en/conversion.md)
 
 `spark-mlx-convert` 将本地 Spark BF16 或 compressed-tensors INT4 checkpoint
-转换为 MLX 格式。转换在 CPU 上分块执行，无需加载模型进行推理，转换实现仅依赖 NumPy。
+转换为 MLX 格式，也支持 Spark 主模型 GGUF。转换在 CPU 上分块执行，无需加载模型进行推理；
+Safetensors 转换仅依赖 NumPy，GGUF 解码使用 `gguf` 包。
 
 ## 1. 支持的输入
 
@@ -12,11 +13,17 @@
 已公开的 Spark-X2.6-4B BF16 与 INT4 模型下载链接见
 [README](../../README.zh.md#1-模型下载)。
 
-**compressed-tensors checkpoint 必须先转换，再用于 `spark-mlx-generate`、
-`spark-mlx-chat` 或 `spark-mlx-server`。** 将转换后的输出目录传给 `--model`。
+**普通与 DSpark 推理入口支持直接传入本地原始检查点。** BF16/MLX 目录直接加载；
+compressed-tensors INT4 默认在内存中准备，主模型 GGUF 首次启动时自动转换并缓存，
+因此手动 convert 为可选步骤。INT4 目录可通过 `--model-cache` 或 Python 的 `model_cache=True` 启用缓存。
+启用后缓存默认在 `~/.cache/spark-mlx-llm/models`。可通过 `--model-cache-dir /path/to/cache`、
+Python 加载参数 `model_cache_dir` 或环境变量 `SPARK_MLX_MODEL_CACHE` 配置缓存根目录。
+显式 CLI/Python 参数优先于环境变量，环境变量优先于默认目录。
 
-如果输入包含浮点 `draft_model.*` 张量，转换器会原样保留张量名称、数据和 draft 配置，
-不对其量化。本文推理示例仅针对不含 draft 权重的模型。
+如果输入包含浮点或本项目量化的 `draft_model.*` 张量，转换器会原样保留张量名称、数据和 draft 配置，
+不对其量化。也可使用 `--draft-source` 附加独立 Safetensors 草稿目录，或
+[公开 BF16 draft GGUF](https://www.modelscope.cn/models/XHToken/Spark-X2.6-4B-DSpark-GGUF/files)。
+草稿 GGUF 输入仅支持浮点格式；主模型 GGUF 的支持范围见下文。
 
 ## 2. 命令行转换
 
@@ -61,6 +68,70 @@
 `--output` 必须是尚不存在的新目录，不能是符号链接，且不能与源目录相互包含。
 转换不会覆盖源模型或已有输出目录。`--chunk-rows` 默认为 `256`，
 减小该值可以降低 CPU 转换期间的临时内存占用。
+
+### 原始 INT4 不落盘加载
+
+推理入口默认对原始 compressed-tensors INT4 在内存中按块重排
+整数编码并构造 MLX affine 参数，不生成转换缓存或临时模型文件。
+Python 的 `load(path)` 和 `load_pair(path)` 对 INT4 目录也默认使用此模式。
+转换校验、scale/zero point 舍入和 tied BF16 输出头处理与磁盘转换一致；
+每次启动都会重新准备，并需要临时内存。缓存目录选项与环境变量在此模式下不使用。
+普通 chat/server 仅支持单进程；主模型 GGUF 暂不支持不落盘加载。
+显式 convert 和 export-draft 仍会保存用户指定的输出。
+
+### 主模型 GGUF
+
+```sh
+.venv/bin/spark-mlx-convert \
+    --source /path/to/Spark-X2.6-4B-Q4_K_M.gguf \
+    --output /path/to/Spark-X2.6-4B-from-GGUF-MLX
+```
+
+主模型导入支持 Spark `spark2_5` 架构、`spark2_5` BPE 分词器和内嵌聊天模板。
+当前可解码 FP32/FP16/BF16、Q4_0/Q4_1、Q4_K/Q5_K/Q6_K、Q8_0 张量，
+覆盖公开 Q4_K_M 文件中的混合精度张量。解码按行分块得到 BF16，再执行现有 MLX 转换规则；
+无需生成完整的中间 BF16 文件。词表、BPE merges、特殊 token 和模板会自动导出。
+
+默认导出本项目 W4/G32＋W8 方案，也可显式 `--quantization none` 保留解码后的 BF16。
+GGUF 路径会重新量化，不能声称保留原 GGUF 的整数码或与 llama.cpp 逐位一致。
+直接将 GGUF 传给推理入口时，自动缓存使用默认混合方案和 `native` 后端配置；
+需要其他导出策略时使用上述显式转换命令。
+
+### 合并独立的主模型与 draft
+
+```sh
+.venv/bin/spark-mlx-convert \
+    --source /path/to/Spark-X2.6-4B-INT4 \
+    --draft-source /path/to/Spark-X2.6-4B-DSpark.gguf \
+    --output /path/to/Spark-X2.6-4B-DSpark-MLX
+```
+
+`--draft-source` 可替换为包含 `config.json` 和浮点权重，或本项目导出的 INT8/INT4
+权重的独立 Safetensors 目录。草稿的整数编码与缩放参数在合并时原样保留。
+当 `--source` 已是 MLX 仿射量化目录时，主模型权重、scale 与 bias 原样复制，
+不重新量化；转换清单记录 `quantization="preserved"`。如果输入已经包含 draft，
+则直接转换该合并检查点，无需再指定 `--draft-source`。
+两种来源都会校验几何参数、特征层、张量形状和可用的 token ID 映射。
+GGUF 的 BF16/FP32 精度保留，Q/K/V 自动拼接，共享 embedding 记录在配置中。
+`--inspect` 同样支持检查独立 draft；输出必须与两侧源文件分离。
+
+无需导出合并目录时，生成或 DSpark HTTP 服务可通过 `--draft-model` 分别加载；
+Python 使用 `load_pair(target_path, draft_path=draft_path)`，示例见
+[生成与聊天](../../README.zh.md#2-生成与聊天)及 [HTTP 服务](../../README.zh.md#3-启动-http-服务)。
+
+转换器保留 draft 已有精度。浮点 draft 默认在加载阶段量化为 INT8；
+同一份 BF16 GGUF、独立 Safetensors 或合并检查点均可使用。可通过 `--draft-quantization int4` 改用 INT4，
+`int4` 对 QKV/FFN 使用 INT4/G32，其余主要投影使用 per-channel INT8。
+该选项用于生成/服务入口，不用于 convert，也不覆盖已有主模型量化策略。
+
+也可用 `python -m spark_mlx_llm.dspark export-draft --model TARGET --draft-model DRAFT
+--draft-quantization int8 --output NEW_DIRECTORY` 提前保存量化草稿（`int4` 同样支持）。
+后续 `--draft-model NEW_DIRECTORY` 或 `--draft-source NEW_DIRECTORY` 会直接使用量化文件。
+已有量化草稿默认按保存格式加载；恢复整数权重、FP32 W8 scale 和 BF16 W4
+scale/offset，不在启动时重新量化。格式与模块规则记录在 `config.json` 的
+`draft_quantization` 字段；外部其他量化布局不自动视为兼容格式。
+
+如需保留浮点草稿精度，显式传入 `--draft-quantization checkpoint` 或 `bf16`。
 
 ## 3. 默认混合精度方案
 

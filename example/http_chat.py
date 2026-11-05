@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 BASE_URL = "http://127.0.0.1:8080"
 TIMEOUT = 300  # 网络超时秒数。
 PAYLOAD = {
-    "model": "default_model",  # 使用服务启动时指定的模型。
+    "model": "spark-x2.6-4b",  # 使用服务启动时指定的模型。
     "messages": [
         {"role": "system", "content": "请使用中文简洁回答。"},
         {"role": "user", "content": "请用一句话介绍你自己。"},

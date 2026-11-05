@@ -13,14 +13,15 @@ repository root.
 | Environment | Requirement |
 | --- | --- |
 | Python | Native CPython 3.12 recommended; the main package declares Python >= 3.10, subject to dependency requirements |
-| macOS / Metal | Apple Silicon, native `arm64` Python, macOS >= 26.2, and an Xcode toolchain with the Metal 4 compiler and MetalPerformancePrimitives headers |
+| macOS / Metal | Apple Silicon, native `arm64` Python; native MLX targets macOS >= 14; optional extension requires macOS >= 26.2 |
 | Linux / CUDA 12 | NVIDIA GPU (SM >= 7.5), driver >= 550.54.14, CUDA Toolkit >= 12.0, and glibc >= 2.35 |
 | Linux / CUDA 13 | A GPU, toolchain, and driver compatible with CUDA 13; driver >= 580 or a CUDA compatibility package meeting upstream requirements |
 | Model files | Obtain a Spark2_5 checkpoint separately; installing the Python package does not download model weights |
 
 See the [MLX installation guide](https://ml-explore.github.io/mlx/build/html/install.html)
-for Linux and CUDA requirements. Installation on Apple Silicon automatically
-builds the extension, so prepare the Xcode toolchain first.
+for Linux and CUDA requirements. Default installation does not build the extension
+or require Xcode. Source builds of the optional `metal` extra require Xcode with
+the Metal 4 compiler and MetalPerformancePrimitives headers.
 
 Inference requires a Metal or CUDA GPU. Checkpoint conversion runs on CPU.
 
@@ -42,7 +43,7 @@ uname -m
 
 `.python-version` selects the development interpreter, while `requires-python`
 declares package compatibility. The main package still supports Python >= 3.10;
-automatic extension installation requires Python >= 3.11.
+extension installation requires Python >= 3.11 and the explicit `metal` extra.
 
 ## 3. Install with uv
 
@@ -65,13 +66,19 @@ Run **only one** of the following installation commands for your platform.
 
 ### Apple Silicon / Metal
 
-Install Xcode with the Metal 4 compiler and finish installing its required
-components. Check the active toolchain, then synchronize the environment:
+Native MLX installation (no extension or Xcode requirement):
+
+```sh
+uv sync --locked
+```
+
+Optional acceleration: on macOS >= 26.2, prepare Xcode with the Metal 4 compiler
+and MetalPerformancePrimitives headers, then run:
 
 ```sh
 xcrun --find metal
 xcrun --sdk macosx --show-sdk-version
-uv sync --locked
+uv sync --locked --extra metal
 ```
 
 This automatically builds `extensions/spark-mlx-ext` and installs it in editable
@@ -145,9 +152,9 @@ inference.
 
 ## 5. Apple Silicon extension
 
-`spark-mlx-ext` is a conditional dependency on macOS `arm64` with Python >= 3.11.
-`uv sync` installs it automatically from this repository. Linux and Python 3.10
-environments skip it. Extension 0.2.0 requires official
+`spark-mlx-ext` is the optional `metal` extra on macOS `arm64` with Python >= 3.11.
+Install it from this repository with `uv sync --locked --extra metal`.
+Default installations, Linux, and Python 3.10 skip it. Extension 0.2.0 requires official
 `mlx==0.32.4`; the current Metal binary configuration requires
 `mlx-metal==0.32.4` and macOS >= 26.2. The existing `cp312-cp312` wheel targets
 standard CPython 3.12 / arm64. W8A8 execution additionally requires Apple M5 or
@@ -175,12 +182,12 @@ print("Extension ready:", version("spark-mlx-ext"))
 PY
 ```
 
-The extension is included in the lockfile. Ordinary
-`uv sync --locked` retains it without `--inexact`. After changing
+The extension is included in the lockfile. Continue passing `--extra metal`
+to retain it during synchronization. After changing
 C++ / Metal sources, rebuild it on Apple Silicon:
 
 ```sh
-uv sync --locked --reinstall-package spark-mlx-ext
+uv sync --locked --extra metal --reinstall-package spark-mlx-ext
 ```
 
 Restart Python / Notebook processes after reinstalling. Model configuration
@@ -188,6 +195,21 @@ selects optimized operators when their extension implementation is available.
 Otherwise, inference uses the native MLX / MLX-LM path. W8A8 fallback retains
 the packed W8 weights but uses floating-point activations, so it is not
 numerically equivalent to W8A8 activation quantization.
+
+Even when a prebuilt extension is bundled, the project checks native `arm64`,
+CPython >= 3.11, macOS >= 26.2, and `mlx==0.32.4` before importing it. Older
+systems, missing extensions, or native loader failures use native MLX paths.
+M1–M4 are not disabled globally; the extension's device capability checks still
+control M5-only operators. Inspect availability or disable it before process startup:
+
+```sh
+.venv/bin/python -m spark_mlx_llm.extension
+SPARK_MLX_DISABLE_EXT=1 .venv/bin/spark-mlx-generate --model /path/to/model --prompt 'Hello'
+```
+
+A macOS 14/15 release must also contain compatible Python, `mlx`, `mlx-metal`,
+and other native binaries. Skipping the extension cannot make other libraries
+built for newer systems compatible.
 
 ## 6. Run model inference
 

@@ -12,6 +12,7 @@ from typing import NamedTuple
 import mlx.core as mx
 from mlx import nn
 
+from ..extension import get_extension
 from .base import OperatorConfig
 
 __all__ = [
@@ -25,28 +26,13 @@ __all__ = [
     "dispatch_linear",
 ]
 
-try:
-    from spark_mlx_ext import w4a16_qmv
-except ImportError:
-    w4a16_qmv = None
-
-try:
-    from spark_mlx_ext import w4a16_multirow
-    from spark_mlx_ext.w4a16_multirow import prepare_w4a16_nax4
-except ImportError:
-    w4a16_multirow = None
-    prepare_w4a16_nax4 = None
-
-try:
-    from spark_mlx_ext import w8a16_per_channel
-except ImportError:
-    w8a16_per_channel = None
-
-try:
-    from spark_mlx_ext import is_w8a8_available, w8a16_multirow
-except ImportError:
-    w8a16_multirow = None
-    is_w8a8_available = None
+_extension = get_extension()
+w4a16_qmv = getattr(_extension, "w4a16_qmv", None)
+w4a16_multirow = getattr(_extension, "w4a16_multirow", None)
+prepare_w4a16_nax4 = getattr(_extension, "prepare_w4a16_nax4", None)
+w8a16_per_channel = getattr(_extension, "w8a16_per_channel", None)
+w8a16_multirow = getattr(_extension, "w8a16_multirow", None)
+is_w8a8_available = getattr(_extension, "is_w8a8_available", None)
 
 # (N, K): measured QKV and MLP-down shapes for the 4B model.
 _SPLITK_SHAPES = frozenset(((6144, 2560), (2560, 10240)))
@@ -269,13 +255,12 @@ def _w4_packed_parameters(layer):
 
 
 def _get_w8a8_operation():
-    try:
-        from spark_mlx_ext import is_w8a8_available, w8a8_linear
-    except ImportError:
+    extension = get_extension()
+    available = getattr(extension, "is_w8a8_available", None)
+    operation = getattr(extension, "w8a8_linear", None)
+    if not callable(available) or not callable(operation) or not available():
         return None
-    if not is_w8a8_available():
-        return None
-    return w8a8_linear
+    return operation
 
 
 def _validate_w8a8_activations(activations):
@@ -538,13 +523,14 @@ class W8A8Projection(nn.Module):
 
     def __init__(self, fallback, weight, scales):
         super().__init__()
-        try:
-            from spark_mlx_ext import W8A8Linear, is_w8a8_available
-        except ImportError as error:
-            raise RuntimeError(
+        extension = get_extension()
+        W8A8Linear = getattr(extension, "W8A8Linear", None)
+        available = getattr(extension, "is_w8a8_available", None)
+        if not callable(W8A8Linear) or not callable(available):
+            raise RuntimeError(  # noqa: TRY004 -- optional extension is unavailable
                 "w8_qmv_backend='w8a8' requires spark-mlx-ext"
-            ) from error
-        if not is_w8a8_available():
+            )
+        if not available():
             raise RuntimeError(
                 "w8_qmv_backend='w8a8' requires Apple M5+ and macOS 26.2+"
             )

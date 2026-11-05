@@ -11,13 +11,14 @@
 | 环境 | 要求 |
 | --- | --- |
 | Python | 推荐原生 CPython 3.12；主包声明支持 Python >= 3.10，实际安装还需满足依赖包要求 |
-| macOS / Metal | Apple Silicon、原生 `arm64` Python、macOS >= 26.2，以及包含 Metal 4 编译器和 MetalPerformancePrimitives 头文件的 Xcode 工具链 |
+| macOS / Metal | Apple Silicon、原生 `arm64` Python；原生 MLX 兼容目标 macOS >= 14；可选扩展要求 macOS >= 26.2 |
 | Linux / CUDA 12 | NVIDIA GPU（SM >= 7.5）、驱动 >= 550.54.14、CUDA Toolkit >= 12.0，以及 glibc >= 2.35 |
 | Linux / CUDA 13 | 使用兼容 CUDA 13 的 GPU、工具链与驱动；驱动 >= 580，或满足上游要求的 CUDA 兼容包 |
 | 模型文件 | 单独准备 Spark2_5 checkpoint；安装 Python 包不会下载模型权重 |
 
 Linux 和 CUDA 要求参见 [MLX 官方安装说明](https://ml-explore.github.io/mlx/build/html/install.html)。
-Apple Silicon 上的安装流程会自动编译扩展，请先准备好上述 Xcode 工具链。
+默认安装不构建扩展、不需要 Xcode；选择 `metal` extra 从源码构建扩展时，
+才需要包含 Metal 4 编译器和 MetalPerformancePrimitives 头文件的 Xcode 工具链。
 
 推理需要 Metal 或 CUDA GPU；模型转换使用 CPU。
 
@@ -38,7 +39,8 @@ uname -m
 | `.venv/` | 本机虚拟环境，安装时生成，不提交到 Git |
 
 `.python-version` 选择开发环境的 Python，`requires-python` 声明包的兼容范围，
-两者作用不同。主包仍声明支持 Python >= 3.10；扩展自动安装要求 Python >= 3.11。
+两者作用不同。主包仍声明支持 Python >= 3.10；扩展安装要求 Python >= 3.11，
+且需显式选择 `metal` extra。
 
 ## 3. 使用 uv 安装
 
@@ -61,13 +63,19 @@ uv python install 3.12
 
 ### Apple Silicon / Metal
 
-先安装包含 Metal 4 编译器的 Xcode，并完成所需组件的安装。确认当前工具链可用，
-然后同步环境：
+原生 MLX 安装（不安装扩展、不需要 Xcode）：
+
+```sh
+uv sync --locked
+```
+
+可选加速扩展：macOS >= 26.2，先准备包含 Metal 4 编译器和
+MetalPerformancePrimitives 头文件的 Xcode，然后执行：
 
 ```sh
 xcrun --find metal
 xcrun --sdk macosx --show-sdk-version
-uv sync --locked
+uv sync --locked --extra metal
 ```
 
 此命令会从 `extensions/spark-mlx-ext` 自动编译并以可编辑方式安装扩展，
@@ -137,8 +145,9 @@ Metal 环境应显示 `metal available: True`，CUDA 环境应显示
 
 ## 5. Apple Silicon 扩展
 
-`spark-mlx-ext` 是主项目在 macOS `arm64`、Python >= 3.11 上的条件依赖，
-由 `uv sync` 从同仓库源码自动安装。Linux 和 Python 3.10 环境不会安装它。
+`spark-mlx-ext` 是可选的 `metal` extra，在 macOS `arm64`、Python >= 3.11 上
+通过 `uv sync --locked --extra metal` 从同仓库源码安装。
+默认安装、Linux 和 Python 3.10 环境不会安装它。
 当前扩展 0.2.0 要求官方
 `mlx==0.32.4`，当前 Metal 二进制配置要求 `mlx-metal==0.32.4` 和
 macOS >= 26.2。已有的 `cp312-cp312` wheel 适用于标准 CPython 3.12 / arm64；
@@ -165,16 +174,29 @@ print("Extension ready:", version("spark-mlx-ext"))
 PY
 ```
 
-扩展已纳入锁定依赖，普通 `uv sync --locked` 会保留它，无需
-`--inexact`。修改 C++ / Metal 源码后需要重新构建；在 Apple Silicon 上执行：
+扩展已纳入锁文件；后续同步时继续指定 `--extra metal` 才会保留它。
+修改 C++ / Metal 源码后需要重新构建；在 Apple Silicon 上执行：
 
 ```sh
-uv sync --locked --reinstall-package spark-mlx-ext
+uv sync --locked --extra metal --reinstall-package spark-mlx-ext
 ```
 
 重新安装后重启 Python / Notebook。模型配置选择的优化算子会在对应扩展实现可用时启用，
 否则回退到 MLX / MLX-LM 原生路径。W8A8 回退保留打包的 W8 权重，
 使用浮点激活，因此与 W8A8 激活量化的数值结果不完全等价。
+
+即使发布包中带有预编译扩展，项目也会在导入前检查原生 `arm64`、CPython >= 3.11、
+macOS >= 26.2 和 `mlx==0.32.4`。旧系统、扩展缺失或动态库无法加载时使用原生
+MLX 路径。M1–M4 不会被整体禁用，M5 专用算子仍由扩展自己的设备能力检查控制。
+可查看状态或在启动进程前强制禁用扩展：
+
+```sh
+.venv/bin/python -m spark_mlx_llm.extension
+SPARK_MLX_DISABLE_EXT=1 .venv/bin/spark-mlx-generate --model /path/to/model --prompt '你好'
+```
+
+发布 macOS 14/15 兼容包时，Python、`mlx`、`mlx-metal` 等所有原生二进制都需要
+支持对应系统；单独跳过扩展不能让按较新系统构建的其他动态库变得兼容。
 
 ## 6. 运行一次模型推理
 

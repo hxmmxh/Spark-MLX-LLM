@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention
 
+from ..extension import get_extension
 from .base import OperatorConfig
 
 __all__ = ["SDPAConfig", "dispatch_sdpa"]
@@ -20,20 +21,10 @@ class SDPAConfig(OperatorConfig):
     verification_bf16_sdpa: bool = False
 
 
-try:
-    from spark_mlx_ext import int8_quantized_sdpa
-except ImportError:
-    int8_quantized_sdpa = None
-
-try:
-    from spark_mlx_ext import bf16_sdpa
-except ImportError:
-    bf16_sdpa = None
-
-try:
-    from spark_mlx_ext import bf16_sdpa_multiquery
-except ImportError:
-    bf16_sdpa_multiquery = None
+_extension = get_extension()
+int8_quantized_sdpa = getattr(_extension, "int8_quantized_sdpa", None)
+bf16_sdpa = getattr(_extension, "bf16_sdpa", None)
+bf16_sdpa_multiquery = getattr(_extension, "bf16_sdpa_multiquery", None)
 
 
 def dispatch_sdpa(

@@ -6,6 +6,8 @@ from functools import cache, partial
 
 import mlx.core as mx
 
+from ..extension import get_extension
+
 
 @dataclass(frozen=True)
 class SamplingOptions:
@@ -121,7 +123,10 @@ def sample_draft(
     if compile_chain and not require_confidence and options.temperature > 0:
         from mlx import nn
 
-        from .draft_quantization import DerivedDraftPerChannelW8Linear
+        from .draft_quantization import (
+            DerivedDraftPerChannelW8Linear,
+            RuntimeDraftW8Linear,
+        )
         from .drafter import DSparkDrafter, VanillaMarkovHead
 
         markov = getattr(drafter, "markov_head", None)
@@ -156,7 +161,9 @@ def sample_draft(
             type(drafter) is DSparkDrafter
             and type(markov) is VanillaMarkovHead
             and type(markov.markov_w1) is nn.Embedding
-            and type(markov.markov_w2) is DerivedDraftPerChannelW8Linear
+            and type(markov.markov_w2)
+            in (DerivedDraftPerChannelW8Linear, RuntimeDraftW8Linear)
+            and getattr(markov.markov_w2, "_native_kernels", True)
             and "bias" not in markov.markov_w2
             and markov.markov_w1.weight.dtype == mx.bfloat16
             and markov.markov_w1.weight.shape[1] % 32 == 0
@@ -252,15 +259,19 @@ def _compiled_markov_chain(options):
 @cache
 def _compiled_cached_markov_chain(options):
     """Conditional cached-bias sampling with explicit derived tensors and RNG."""
-    import spark_mlx_ext as ext
+    operation = getattr(get_extension(), "cached_markov_bias", None)
 
     @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
     def chain(base, anchors, embedding, projection, bias_cache, lookup):
         previous = anchors
         tokens, proposals = [], []
         for i in range(base.shape[1]):
-            bias = ext.cached_markov_bias(
-                previous.astype(mx.int32), embedding, projection, bias_cache, lookup
+            bias = (
+                operation(
+                    previous.astype(mx.int32), embedding, projection, bias_cache, lookup
+                )
+                if callable(operation)
+                else mx.take(embedding, previous, axis=0) @ projection.T
             )
             proposal = probabilities(base[:, i] + bias, options)
             previous = sample_probabilities(proposal)
@@ -274,7 +285,7 @@ def _compiled_cached_markov_chain(options):
 @cache
 def _compiled_per_channel_markov_chain(options):
     """Unchanged per-channel W8 M1 proposals with explicit tensors and RNG."""
-    import spark_mlx_ext as ext
+    operation = getattr(get_extension(), "w8a16_per_channel", None)
 
     @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
     def chain(base, anchors, embedding, projection, scales):
@@ -282,7 +293,15 @@ def _compiled_per_channel_markov_chain(options):
         tokens, proposals = [], []
         for i in range(base.shape[1]):
             previous_embedding = mx.take(embedding, previous, axis=0)
-            bias = ext.w8a16_per_channel(previous_embedding, projection, scales)
+            bias = (
+                operation(previous_embedding, projection, scales)
+                if callable(operation)
+                else (
+                    previous_embedding.astype(mx.float32)
+                    @ projection.astype(mx.float32).T
+                    * scales
+                ).astype(previous_embedding.dtype)
+            )
             proposal = probabilities(base[:, i] + bias, options)
             previous = sample_probabilities(proposal)
             tokens.append(previous)

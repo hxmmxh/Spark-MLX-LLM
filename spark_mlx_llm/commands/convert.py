@@ -15,9 +15,17 @@ def main(argv=None, *, prog=None):
         allow_abbrev=False,
     )
     parser.add_argument(
-        "--source", required=True, type=Path, help="Local model directory"
+        "--source",
+        required=True,
+        type=Path,
+        help="Local model directory or Spark target GGUF file",
     )
     parser.add_argument("--output", type=Path, help="New MLX directory; must not exist")
+    parser.add_argument(
+        "--draft-source",
+        type=Path,
+        help="Attach a standalone Spark DSpark BF16 GGUF or Safetensors directory",
+    )
     parser.add_argument(
         "--quantization",
         choices=("mixed", "none"),
@@ -41,12 +49,13 @@ def main(argv=None, *, prog=None):
         result = conversion.convert_to_mlx(
             args.source,
             args.output,
+            draft_source=args.draft_source,
             quantization=args.quantization,
             w8_backend=args.w8_backend,
             inspect_only=args.inspect,
             chunk_rows=args.chunk_rows,
         )
-    except (ValueError, OSError, KeyError, NotImplementedError) as error:
+    except (ValueError, TypeError, OSError, KeyError, NotImplementedError) as error:
         parser.exit(1, f"Conversion failed: {error}\n")
     print(
         json.dumps(

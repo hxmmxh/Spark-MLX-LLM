@@ -1,14 +1,17 @@
-"""Opt-in derived W8 proposal backend; checkpoint and target stay untouched.
+"""Experimental and loading-time draft quantization backends.
 
 This changes the draft's numeric proposal distribution. Acceptance must always
-use the proposal probabilities actually returned by that new draft. Original
-module objects are retained for restoration; memory reduction is not claimed.
+use the proposal probabilities actually returned by that new draft. Experimental
+handles retain original modules for restoration. Runtime profiles keep only
+quantized projections and preserve checkpoint files and target weights.
 """
 
 import math
 
 import mlx.core as mx
 from mlx import nn
+
+from ..extension import get_extension
 
 
 class _DenseReadout(nn.Module):
@@ -68,17 +71,29 @@ class DerivedDraftPerChannelW8Linear(nn.Module):
             and x.dtype == mx.bfloat16
             and x.shape[-1] % 32 == 0
         ):
-            import spark_mlx_ext as ext
-
+            ext = get_extension()
+            if ext is None:
+                return self._fallback(x)
             rows = math.prod(x.shape[:-1])
             if rows == 1:
-                value = ext.w8a16_per_channel(x, self.weight, self.scales)
+                operation = getattr(ext, "w8a16_per_channel", None)
+                if not callable(operation):
+                    return self._fallback(x)
+                value = operation(x, self.weight, self.scales)
             elif 2 <= rows <= 8 and (
                 self._variant != "nax"
                 or self.weight.shape[0] % 32 == 0
                 and x.shape[-1] % 64 == 0
             ):
-                value = ext.w8a16_multirow(
+                operation = getattr(ext, "w8a16_multirow", None)
+                available = getattr(ext, "is_w8a8_available", None)
+                if (
+                    not callable(operation)
+                    or self._variant == "nax"
+                    and (not callable(available) or not available())
+                ):
+                    return self._fallback(x)
+                value = operation(
                     x,
                     self.weight,
                     self.scales,
@@ -336,3 +351,214 @@ class DerivedDraftW8:
 def install_derived_draft_w8(drafter, **kwargs):
     """Prepare W8 proposal tensors outside timing and return a restore handle."""
     return DerivedDraftW8(drafter, **kwargs)
+
+
+class _QuantizedPerChannelReadout(nn.Module):
+    """Portable execution of the stored INT8 codes and FP32 channel scales."""
+
+    def __init__(self, weight, scales, bias=None):
+        super().__init__()
+        self.weight, self.scales = weight, scales
+        if bias is not None:
+            self.bias = bias
+
+    def __call__(self, x):
+        value = (
+            (x.astype(mx.float32) @ self.weight.astype(mx.float32).T) * self.scales
+        ).astype(x.dtype)
+        return value + self.bias if "bias" in self else value
+
+
+class RuntimeDraftW8Linear(DerivedDraftPerChannelW8Linear):
+    """Deployable W8 with a quantized fallback and no retained source module.
+
+    Supported Metal devices use the existing per-channel W8 kernels. Other
+    devices and shapes compute from the same quantized weights in floating
+    point; the original BF16 matrix is not kept as a fallback.
+    """
+
+    def __init__(self, weight, *, bias=None):
+        # The source is floating point, including FP32 checkpoint tensors or an
+        # explicit dtype override. Quantization arithmetic uses FP32 throughout.
+        nn.Module.__init__(self)
+        if weight.ndim != 2 or not mx.issubdtype(weight.dtype, mx.floating):
+            raise ValueError("Runtime W8 requires a floating-point matrix")
+        scores = weight.astype(mx.float32)
+        maximum = mx.max(mx.abs(scores), axis=-1)
+        self.scales = mx.where(maximum > 0, maximum / 127, 1)
+        self.weight = mx.clip(
+            mx.round(scores / self.scales[:, None]), -127, 127
+        ).astype(mx.int8)
+        if bias is not None:
+            self.bias = bias
+        self._finish()
+
+    @classmethod
+    def from_quantized(cls, weight, scales, *, bias=None):
+        """Restore serialized codes without quantization or random initialization."""
+        layer = cls.__new__(cls)
+        nn.Module.__init__(layer)
+        layer.weight, layer.scales = weight, scales
+        if bias is not None:
+            layer.bias = bias
+        layer._finish()
+        return layer
+
+    def _finish(self):
+        self._variant = "nax"
+        object.__setattr__(
+            self,
+            "_fallback",
+            _QuantizedPerChannelReadout(self.weight, self.scales, self.get("bias")),
+        )
+        # Exact module type checks in optimized sampling/context paths also
+        # consult this capability flag before invoking extension kernels.
+        enabled = False
+        if mx.default_device() == mx.gpu and mx.metal.is_available():
+            ext = get_extension()
+            enabled = bool(getattr(ext, "is_w8a8_available", lambda: False)())
+        object.__setattr__(self, "_native_kernels", enabled)
+        self.freeze()
+
+    def __call__(self, x):
+        if not self._native_kernels:
+            return self._fallback(x)
+        return super().__call__(x)
+
+
+class RuntimeDraftW4Linear(nn.QuantizedLinear):
+    """Target-rule asymmetric W4/G32 with BF16 scales and affine offsets."""
+
+    def __init__(self, weight, *, bias=None, chunk_rows=256):
+        import numpy as np
+
+        from ..conversion import _coefficient, _packed
+
+        if (
+            weight.ndim != 2
+            or min(weight.shape) <= 0
+            or weight.shape[1] % 32
+            or not mx.issubdtype(weight.dtype, mx.floating)
+        ):
+            raise ValueError(
+                "Runtime INT4/G32 requires a floating matrix with K divisible by 32"
+            )
+        nn.Module.__init__(self)
+        self.bits, self.group_size, self.mode = 4, 32, "affine"
+        packed, scales, biases = [], [], []
+        for first in range(0, weight.shape[0], chunk_rows):
+            values = np.array(weight[first : first + chunk_rows].astype(mx.float32))
+            if not np.isfinite(values).all():
+                raise ValueError("Non-finite runtime INT4 source weights")
+            grouped = values.reshape(values.shape[0], -1, 32)
+            lower = np.minimum(grouped.min(axis=-1), 0)
+            upper = np.maximum(grouped.max(axis=-1), 0)
+            step = (upper - lower) / np.float32(15)
+            step = np.where(step == 0, np.float32(1), step)
+            scale_bits, rounded = _coefficient(step, "BF16")
+            if not (rounded > 0).all():
+                raise ValueError("Runtime INT4 scale underflow")
+            zeros = np.clip(np.rint(-lower / rounded), 0, 15)
+            codes = np.clip(
+                np.rint(grouped / rounded[..., None]) + zeros[..., None], 0, 15
+            )
+            bias_bits, _ = _coefficient(-zeros * rounded, "BF16")
+            packed.append(mx.array(_packed(codes.reshape(values.shape), 4)))
+            scales.append(mx.array(scale_bits).view(mx.bfloat16))
+            biases.append(mx.array(bias_bits).view(mx.bfloat16))
+        self.weight = mx.concatenate(packed)
+        self.scales = mx.concatenate(scales)
+        self.biases = mx.concatenate(biases)
+        if bias is not None:
+            self.bias = bias
+        self.freeze()
+
+    @classmethod
+    def from_quantized(cls, weight, scales, biases, *, bias=None):
+        """Restore the packed affine representation exactly as saved."""
+        layer = cls.__new__(cls)
+        nn.Module.__init__(layer)
+        layer.bits, layer.group_size, layer.mode = 4, 32, "affine"
+        layer.weight, layer.scales, layer.biases = weight, scales, biases
+        if bias is not None:
+            layer.bias = bias
+        layer.freeze()
+        return layer
+
+
+def restore_runtime_draft(drafter, weights, schema):
+    """Install validated serialized projections before strict parameter loading."""
+    report = {
+        "policy": schema["policy"],
+        "loaded_from_checkpoint": True,
+        "int4_modules": [],
+        "int8_modules": [],
+        "int4_group_size": 32 if schema["policy"] == "int4" else None,
+        "int8_scheme": "symmetric_per_channel_fp32_scales",
+        "external_readout": "unchanged",
+    }
+    for name, spec in schema["modules"].items():
+        args = [weights[name + ".weight"], weights[name + ".scales"]]
+        if spec["bits"] == 4:
+            args.append(weights[name + ".biases"])
+        constructor = (
+            RuntimeDraftW4Linear if spec["bits"] == 4 else RuntimeDraftW8Linear
+        )
+        layer = constructor.from_quantized(*args, bias=weights.get(name + ".bias"))
+        parent, key = _parent(drafter, name)
+        parent[key] = layer
+        report["int4_modules" if spec["bits"] == 4 else "int8_modules"].append(name)
+    return report
+
+
+def quantize_runtime_draft(drafter, policy="bf16"):
+    """Quantize selected draft modules once after strict checkpoint loading.
+
+    INT8: W8 per output channel on fc, attention QKV/out, FFN, the Markov
+    projection and an independent draft lm_head. INT4: replace QKV/FFN with
+    target-rule W4/G32 and retain W8 on the remaining selected modules. Token
+    embeddings, attention gates, norms, confidence and external readout stay
+    under their existing policies. No restore handle retains source matrices.
+    """
+    if policy not in ("bf16", "int8", "int4"):
+        raise ValueError("draft_quantization must be bf16, int8 or int4")
+    report = {
+        "policy": policy,
+        "int4_group_size": 32 if policy == "int4" else None,
+        "int8_scheme": "symmetric_per_channel_fp32_scales"
+        if policy != "bf16"
+        else None,
+        "int4_modules": [],
+        "int8_modules": [],
+        "kept_float_modules": [],
+        "external_readout": "unchanged",
+    }
+    if policy == "bf16":
+        return report
+    candidates = []
+    for name, module in drafter.named_modules():
+        if type(module) is not nn.Linear:
+            continue
+        if name.startswith("confidence_head.") or name.endswith(".self_attn.g_proj"):
+            report["kept_float_modules"].append(name)
+            continue
+        if not mx.issubdtype(module.weight.dtype, mx.floating):
+            raise ValueError(
+                f"{name}: loading-time quantization requires floating source weights"
+            )
+        is_w4 = policy == "int4" and (
+            name.endswith(".self_attn.q_k_v_proj")
+            or ".mlp." in name
+            and name.rsplit(".", 1)[-1] in ("gate_proj", "up_proj", "down_proj")
+        )
+        if is_w4 and module.weight.shape[1] % 32:
+            raise ValueError(f"{name}: INT4/G32 requires K divisible by 32")
+        candidates.append((name, module, is_w4))
+    for name, original, is_w4 in candidates:
+        constructor = RuntimeDraftW4Linear if is_w4 else RuntimeDraftW8Linear
+        quantized = constructor(original.weight, bias=original.get("bias"))
+        mx.eval(quantized.parameters())
+        parent, key = _parent(drafter, name)
+        parent[key] = quantized
+        report["int4_modules" if is_w4 else "int8_modules"].append(name)
+    return report

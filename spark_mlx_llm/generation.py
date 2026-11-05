@@ -192,6 +192,11 @@ class GenerationConfig:
         return result
 
     @classmethod
+    def cli_defaults(cls):
+        """Default to low thinking when a CLI applies the model chat template."""
+        return cls(enable_thinking=True, reasoning_effort="low")
+
+    @classmethod
     def add_arguments(cls, parser, *, include_kv=True):
         defaults = cls()
         group = parser.add_argument_group("shared inference settings")
@@ -218,13 +223,13 @@ class GenerationConfig:
             dest="enable_thinking",
             action=argparse.BooleanOptionalAction,
             default=argparse.SUPPRESS,
-            help="Enable/disable thinking (default: model chat template)",
+            help="Enable/disable thinking (default: enabled)",
         )
         group.add_argument(
             "--reasoning-effort",
             choices=("low", "high"),
             default=argparse.SUPPRESS,
-            help="Thinking effort (default: model chat template)",
+            help="Thinking effort (default: low)",
         )
         group.add_argument(
             "--chat-template-args",
@@ -251,7 +256,12 @@ class GenerationConfig:
                         "KV/prefill settings in --config are only supported by "
                         f"spark-mlx-generate: {sorted(unsupported)}"
                     )
-            config = cls.from_dict(values)
+            defaults = (
+                cls()
+                if getattr(args, "ignore_chat_template", False)
+                else cls.cli_defaults()
+            )
+            config = defaults.overlay(values)
             values = vars(args)
             return config.overlay(
                 {

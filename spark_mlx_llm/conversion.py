@@ -1,11 +1,12 @@
-"""Convert local Spark BF16 or compressed-tensors INT4 checkpoints to MLX.
+"""Convert Spark BF16, compressed-tensors INT4 or target GGUF checkpoints to MLX.
 
 Dimensions come from config.json. By default QKV/MLP use asymmetric INT4/G32,
 out_proj and lm_head use symmetric per-channel INT8 with dynamic per-token INT8
 activations (w8a8 backend), and gates/embedding/norms remain BF16. Draft tensors
 are copied byte-for-byte. Use --quantization none to keep a BF16 target.
 
-Requires NumPy only; conversion is streamed on CPU without loading the model.
+Safetensors conversion requires NumPy; GGUF decoding additionally uses gguf.
+Conversion is streamed on CPU without loading the model for inference.
 """
 
 from __future__ import annotations
@@ -25,6 +26,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
+
+from .dspark.checkpoint import CheckpointInfo, TensorInfo, validate_draft_shapes
+from .dspark.config import DSparkConfig
+from .dspark.draft_source import read_tensor, resolve_draft_source
 
 __all__ = ["convert_to_mlx"]
 
@@ -132,6 +137,12 @@ def inventory(source, *, include_draft_shards=False):
 
 
 def read(desc, first=0, stop=None):
+    if "gguf_type" in desc:
+        from .gguf_target import read_gguf_rows
+
+        return read_gguf_rows(desc, first, desc["shape"][0] if stop is None else stop)
+    if "parts" in desc:
+        return read_tensor(desc, first, stop)
     stop = desc["shape"][0] if stop is None else stop
     stride = desc["bytes"] // desc["shape"][0]
     with desc["path"].open("rb") as stream:
@@ -414,7 +425,8 @@ ACTIVATIONS = {
 }
 W4_SUFFIXES = ("self_attn.q_k_v_proj", "mlp.gate_proj", "mlp.up_proj", "mlp.down_proj")
 DRAFT_TODO = (
-    "TODO: add draft quantization; draft tensors are currently copied unchanged."
+    "Draft tensors preserve their stored precision, including versioned MLX INT8/INT4. "
+    "Floating drafts can be quantized at load time or exported with export-draft."
 )
 
 
@@ -450,11 +462,26 @@ def _plan(config, tensors, quantization):
         "--quantization none requires a BF16 source (INT4 dequantization is unsupported)",
     )
     draft = {k: v for k, v in tensors.items() if k.startswith("draft_model.")}
-    # TODO: implement draft quantization after its execution policy is supported.
-    require(
-        all(v["dtype"] in ("BF16", "F16", "F32") for v in draft.values()),
-        "Draft must be floating point; quantized draft checkpoints are unsupported",
-    )
+    if draft:
+        draft_checkpoint = CheckpointInfo(
+            Path("."),
+            tuple(
+                TensorInfo(
+                    name,
+                    tuple(desc["shape"]),
+                    desc["dtype"],
+                    Path("."),
+                    (0, desc["bytes"]),
+                )
+                for name, desc in draft.items()
+            ),
+        )
+        validate_draft_shapes(
+            DSparkConfig.from_spark_dict(config),
+            draft_checkpoint,
+            shared_embedding=config.get("dspark_shared_embedding", False),
+            quantization=config.get("draft_quantization"),
+        )
     skipped = sorted(k for k in tensors if "rotary_emb.inv_freq" in k)
     target = {k: v for k, v in tensors.items() if k not in draft and k not in skipped}
     if config.get("tie_word_embeddings", True) and "lm_head.weight" in target:
@@ -631,7 +658,7 @@ def _write(path, planned, modules, tensors, chunk_rows):
             step = max(1, (8 * 1024 * 1024) // stride)
             for first in range(0, desc["shape"][0], step):
                 stream.write(read(desc, first, min(first + step, desc["shape"][0])))
-        for i, (module, scheme) in enumerate(modules.items(), 1):
+        for module, scheme in modules.items():
             stats[module] = {}
             for first in range(0, scheme["shape"][0], chunk_rows):
                 stop = min(first + chunk_rows, scheme["shape"][0])
@@ -647,34 +674,117 @@ def _write(path, planned, modules, tensors, chunk_rows):
                     stream.write(data)
                 for key, value in errors.items():
                     stats[module][key] = max(stats[module].get(key, 0.0), value)
-            print(
-                f"Converted {i}/{len(modules)}: {module}", file=sys.stderr, flush=True
-            )
         stream.flush()
         os.fsync(stream.fileno())
     return stats
+
+
+def _validate_mlx_target(config, tensors):
+    """Check existing affine storage before copying it into a merged output."""
+    linear, plain = shapes(config)
+    quantization = config["quantization"]
+    require(isinstance(quantization, dict), "Invalid MLX quantization configuration")
+    consumed = set()
+
+    def expect(name, shape, dtypes):
+        desc = tensors.get(name)
+        require(
+            desc is not None and desc["shape"] == shape and desc["dtype"] in dtypes,
+            f"MLX target tensor dtype/shape mismatch: {name}",
+        )
+        consumed.add(name)
+
+    for name, shape in plain.items():
+        expect(name, shape, ("BF16", "F16", "F32"))
+    for module, (rows, columns) in linear.items():
+        if module + ".scales" not in tensors:
+            expect(module + ".weight", [rows, columns], ("BF16", "F16", "F32"))
+            continue
+        scheme = quantization.get(module, quantization)
+        require(isinstance(scheme, dict), f"Invalid MLX affine policy: {module}")
+        bits, group = scheme.get("bits", 4), scheme.get("group_size", 64)
+        require(
+            type(bits) is int
+            and bits in (4, 8)
+            and type(group) is int
+            and group > 0
+            and columns % group == 0
+            and columns % (32 // bits) == 0
+            and scheme.get("mode", "affine") == "affine",
+            f"Unsupported MLX affine geometry: {module}",
+        )
+        expect(module + ".weight", [rows, columns // (32 // bits)], ("U32",))
+        for suffix in ("scales", "biases"):
+            expect(
+                module + "." + suffix, [rows, columns // group], ("BF16", "F16", "F32")
+            )
+    require(
+        consumed == tensors.keys(),
+        f"Unexpected MLX target tensors: {sorted(tensors.keys() - consumed)}",
+    )
+
+
+def _mlx_config(config, modules, *, w8_backend="native", preserved_mlx=False):
+    """Share storage and execution metadata between disk and memory preparation."""
+    effective = copy.deepcopy(config)
+    storage = {"bits": 4, "group_size": 32, "mode": "affine"}
+    storage.update(
+        {
+            m: {"bits": s["bits"], "group_size": 32, "mode": "affine"}
+            for m, s in modules.items()
+        }
+    )
+    execution = copy.deepcopy(storage)
+    for module, scheme in modules.items():
+        if scheme["bits"] == 8 and w8_backend == "w8a8":
+            execution[module]["input_activations"] = copy.deepcopy(ACTIVATIONS)
+    if not preserved_mlx:
+        for key in (
+            "auto_map",
+            "model_file",
+            "compression_config",
+            "quantization_config",
+        ):
+            effective.pop(key, None)
+        effective.update(
+            dtype="bfloat16", torch_dtype="bfloat16", quantize_activations=False
+        )
+    if modules:
+        effective.update(
+            quantization=storage,
+            quantization_config=execution,
+            w8_qmv_backend=w8_backend,
+        )
+    return effective
 
 
 def convert_to_mlx(
     source: str | Path,
     output: str | Path | None = None,
     *,
+    draft_source: str | Path | None = None,
     quantization: Literal["mixed", "none"] = "mixed",
     w8_backend: Literal["w8a8", "w8a16", "native"] = "w8a8",
     inspect_only: bool = False,
     chunk_rows: int = 256,
 ) -> dict[str, Any]:
-    """Convert a local BF16 or compressed-tensors Spark checkpoint to MLX.
+    """Convert a local BF16, compressed-tensors or GGUF Spark target to MLX.
 
     Model dimensions are read from the source configuration. Conversion runs
     on CPU in bounded chunks and publishes the output only after validation.
     Draft weights are copied unchanged and are never quantized.
 
     Args:
-        source: Path to a local model directory containing ``config.json``,
+        source: Path to a local Spark target GGUF file or directory containing ``config.json``,
             single-file or sharded Safetensors weights, and tokenizer files.
             BF16 and compressed-tensors INT4 checkpoints are supported,
-            including checkpoints with ``draft_model.*`` tensors.
+            including checkpoints with ``draft_model.*`` tensors. GGUF weights
+            are decoded to BF16 in bounded row chunks before conversion; the
+            mixed policy requantizes and does not preserve GGUF integer codes.
+        draft_source: Optional standalone Spark DSpark BF16 GGUF file or
+            floating-point/exported INT8/INT4 MLX Safetensors directory. The output includes normalized
+            draft weights and configuration. Existing MLX target weights are
+            preserved when attaching a separate draft.
         output: Destination directory. It must not exist or be a symlink, and
             neither source nor output may contain the other. Defaults to None,
             which is allowed only when ``inspect_only=True``. If supplied during
@@ -724,7 +834,11 @@ def convert_to_mlx(
             directory publication operation.
     """
     source = Path(source).expanduser().resolve()
-    require(source.is_dir(), f"Missing source directory: {source}")
+    gguf_source = source.is_file() and source.suffix.lower() == ".gguf"
+    require(
+        source.is_dir() or gguf_source,
+        f"Expected a model directory or a Spark target .gguf: {source}",
+    )
     require(quantization in ("mixed", "none"), "Expected quantization=mixed or none")
     require(w8_backend in ("w8a8", "w8a16", "native"), "Invalid W8 backend")
     require(type(chunk_rows) is int and chunk_rows > 0, "chunk_rows must be positive")
@@ -741,46 +855,119 @@ def convert_to_mlx(
         )
         if output.exists():
             raise FileExistsError(f"Output already exists: {output}")
-    config = json.loads((source / "config.json").read_text())
-    tensors, files = inventory(source, include_draft_shards=True)
-    effective, target, modules, planned, skipped, untie, compressed = _plan(
-        config, tensors, quantization
+    generated_assets = {}
+    if gguf_source:
+        from .gguf_target import read_target_gguf
+
+        config, tensors, generated_assets = read_target_gguf(source)
+        files = set()
+    else:
+        config = json.loads((source / "config.json").read_text())
+        tensors, files = inventory(source, include_draft_shards=True)
+    draft = None
+    if draft_source is not None:
+        require(
+            not any(k.startswith("draft_model.") for k in tensors),
+            "Source already contains draft weights; omit --draft-source or use a target-only checkpoint",
+        )
+        vocab = (
+            json.loads(generated_assets["tokenizer.json"])["model"]["vocab"]
+            if gguf_source
+            else None
+        )
+        draft = resolve_draft_source(
+            draft_source,
+            config,
+            target_directory=None if gguf_source else source,
+            target_vocabulary=vocab,
+        )
+        if output is not None:
+            require(
+                all(output != p and output not in p.parents for p in draft.files),
+                "Draft source and output must be disjoint",
+            )
+            draft_root = Path(draft_source).expanduser().resolve()
+            if draft_root.is_dir():
+                require(
+                    draft_root != output
+                    and draft_root not in output.parents
+                    and output not in draft_root.parents,
+                    "Draft source and output directories must be disjoint",
+                )
+    preserved_mlx = bool(config.get("quantization")) and draft is not None
+    if preserved_mlx:
+        # Merge already-converted weights without requantizing their integer codes.
+        require(config.get("model_type") == "spark2_5", "Expected model_type=spark2_5")
+        _validate_mlx_target(config, tensors)
+        effective, target = copy.deepcopy(config), dict(tensors)
+        modules, skipped, untie, compressed = {}, [], False, False
+        planned = {k: {n: v[n] for n in ("dtype", "shape")} for k, v in tensors.items()}
+    else:
+        effective, target, modules, planned, skipped, untie, compressed = _plan(
+            config, tensors, quantization
+        )
+    if gguf_source:
+        effective["gguf_import"].update(
+            target_policy="mixed_w4g32_w8"
+            if quantization == "mixed"
+            else "decoded_bfloat16",
+            requantized=quantization == "mixed",
+        )
+    if draft is not None:
+        for key in draft.config:
+            if (
+                key not in config
+                or key.startswith("dspark_")
+                or key
+                in (
+                    "num_draft_layers",
+                    "mask_token_id",
+                    "target_layer_ids",
+                    "draft_vocab_size",
+                    "markov_rank",
+                    "markov_head_type",
+                    "enable_confidence_head",
+                    "confidence_head_with_markov",
+                    "fc_norm",
+                    "sample_from_anchor",
+                    "logits_start",
+                    "draft_quantization",
+                )
+            ):
+                effective[key] = copy.deepcopy(draft.config[key])
+        for name, desc in draft.tensors.items():
+            tensors["draft_model." + name] = desc
+            planned["draft_model." + name] = {n: desc[n] for n in ("dtype", "shape")}
+    assets = (
+        list(generated_assets)
+        if gguf_source
+        else [n for n in ASSETS if (source / n).is_file()]
     )
-    assets = [n for n in ASSETS if (source / n).is_file()]
     require(
         "tokenizer_config.json" in assets
         and ("tokenizer.json" in assets or "tokenizer.model" in assets),
         "Missing tokenizer files",
     )
-    storage = {"bits": 4, "group_size": 32, "mode": "affine"}
-    storage.update(
-        {
-            m: {"bits": s["bits"], "group_size": 32, "mode": "affine"}
-            for m, s in modules.items()
-        }
+    effective = _mlx_config(
+        effective, modules, w8_backend=w8_backend, preserved_mlx=preserved_mlx
     )
-    execution = copy.deepcopy(storage)
-    for module, scheme in modules.items():
-        if scheme["bits"] == 8 and w8_backend == "w8a8":
-            execution[module]["input_activations"] = copy.deepcopy(ACTIVATIONS)
-    for key in ("auto_map", "model_file", "compression_config", "quantization_config"):
-        effective.pop(key, None)
-    effective.update(
-        dtype="bfloat16", torch_dtype="bfloat16", quantize_activations=False
-    )
-    if modules:
-        effective.update(
-            quantization=storage,
-            quantization_config=execution,
-            w8_qmv_backend=w8_backend,
-        )
     result = {
         "status": "inspected" if inspect_only else "complete",
         "source": str(source),
         "output": str(output) if output else None,
-        "source_format": "compressed-tensors" if compressed else "bf16",
-        "quantization": quantization,
-        "w8_backend": w8_backend if modules else None,
+        "source_format": "gguf"
+        if gguf_source
+        else "mlx"
+        if preserved_mlx
+        else "compressed-tensors"
+        if compressed
+        else "bf16",
+        "quantization": "preserved" if preserved_mlx else quantization,
+        "w8_backend": effective.get("w8_qmv_backend")
+        if preserved_mlx
+        else w8_backend
+        if modules
+        else None,
         "quantized_module_counts": {
             str(b): sum(s["bits"] == b for s in modules.values()) for b in (4, 8)
         },
@@ -791,6 +978,11 @@ def convert_to_mlx(
         "lm_head_untied": untie,
         "draft_tensor_count": sum(k.startswith("draft_model.") for k in planned),
         "draft_quantized": False,
+        "draft_source": str(Path(draft_source).expanduser().resolve())
+        if draft
+        else None,
+        "draft_source_format": draft.source_format if draft else None,
+        "draft_shared_embedding": effective.get("dspark_shared_embedding", False),
         "draft_todo": DRAFT_TODO,
         "skipped_tensors": skipped,
         "output_tensor_bytes": sum(
@@ -818,7 +1010,13 @@ def convert_to_mlx(
             "coefficient_dtypes",
         )
     }
-    tracked = [source / n for n in files | set(assets) | {"config.json"}]
+    tracked = (
+        [source]
+        if gguf_source
+        else [source / n for n in files | set(assets) | {"config.json"}]
+    )
+    if draft is not None:
+        tracked.extend(draft.files)
     signatures = {p: (p.stat().st_size, p.stat().st_mtime_ns) for p in tracked}
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = Path(
@@ -842,7 +1040,10 @@ def convert_to_mlx(
             mapping.update({k: "model-draft.safetensors" for k in draft_plan})
         (partial / "config.json").write_text(json.dumps(effective, indent=2) + "\n")
         for name in assets:
-            shutil.copyfile(source / name, partial / name)
+            if name in generated_assets:
+                (partial / name).write_bytes(generated_assets[name])
+            else:
+                shutil.copyfile(source / name, partial / name)
         index = {
             "metadata": {"total_size": result["output_tensor_bytes"]},
             "weight_map": dict(sorted(mapping.items())),
