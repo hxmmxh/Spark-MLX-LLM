@@ -10,33 +10,31 @@
 
 Spark-MLX-LLM 是面向 **Spark 2.6 和 Spark 2.5** 的本地推理项目，基于
 [MLX](https://github.com/ml-explore/mlx) 和 [MLX LM](https://github.com/ml-explore/mlx-lm)。
-本项目针对星火模型结构、混合精度量化和 Apple Silicon 上的推理计算进行了专门适配与优化，
-提供模型转换、文本生成、交互式聊天和 HTTP 服务，方便在本地部署和使用星火模型。
+项目针对星火模型结构、混合精度权重和 Apple Silicon 进行适配与优化，
+支持直接加载官方 INT4 模型，提供文本生成、交互式聊天、Python API 和 HTTP 服务。
+
+[环境配置](#环境配置) · [生成与聊天](#2-生成与聊天) · [HTTP 服务](#3-启动-http-服务) ·
+[量化与兼容性](#量化与兼容性说明) · [文档导航](#文档导航)
 
 ## 项目特色
 
-- **星火模型适配与转换**：将 BF16 和 compressed-tensors INT4 checkpoint 转换为 MLX 格式。
-- **混合精度量化**：按模块采用 INT4、INT8、BF16 权重，并支持配置 W8 执行后端。
-- **DSpark 推测解码**：加载主模型与草稿模型的合并检查点，支持分别配置两侧采样参数。
-- **Apple Silicon 推理优化**：提供专用 QKV/RoPE、线性层和 INT8 KV 注意力算子，
-  根据配置、设备与输入形状选择执行路径。
+- **官方模型直接加载**：支持 Spark-X2.6-4B-INT4 和 Spark-X2.6-1.7B-INT4，无需提前转换。
+- **混合精度适配**：保留官方模型已有的 INT4、INT8、BF16 权重方案，支持配置 W8 执行后端。
+- **DSpark 推测解码**：支持分别加载主模型与配套草稿，或加载合并模型，并独立配置两侧采样参数。
+- **Apple Silicon 优化**：提供专用 QKV/RoPE、线性层和 INT8 KV 注意力算子，按配置、设备与输入形状选择执行路径。
 - **多种使用方式**：提供命令行生成与聊天、Python 普通与流式生成 API，以及 HTTP 服务。
 
 ## 环境配置
 
-以下 Apple Silicon 安装流程需要：
+以下以 Apple Silicon 为例。Linux/CUDA 安装与常见问题见[环境配置说明](docs/zh/environment.md)。
 
 | 项目 | 要求 |
 | --- | --- |
-| 硬件与系统 | Apple Silicon，macOS >= 26.2 |
+| 硬件与系统 | Apple Silicon；原生 MLX 兼容目标为 macOS ≥ 14 |
 | Python | 原生 `arm64` CPython，推荐 3.12 |
-| 编译工具链 | 包含 Metal 4 编译器和 MetalPerformancePrimitives 头文件的 Xcode |
+| 可选加速扩展 | macOS ≥ 26.2；源码构建需要 Xcode |
 
-W8A8 加速还需要 **Apple M5 或更新芯片**及兼容的 `spark-mlx-ext`。
-该后端不可用时，W8 投影回退到使用浮点激活的 MLX affine 算子，详见[量化与兼容性说明](#量化与兼容性说明)。
-
-使用 [uv](https://docs.astral.sh/uv/getting-started/installation/) 管理 Python 和依赖。
-准备好 Xcode 并安装 uv 后，执行：
+先安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)，再获取源码并安装依赖：
 
 ```sh
 git clone https://github.com/XHToken/Spark-MLX-LLM.git
@@ -45,120 +43,97 @@ uv python install 3.12
 uv sync --locked
 ```
 
-安装会自动创建 `.venv`、安装项目依赖并编译仓库内的 Apple Silicon 扩展。
-后续命令均在仓库根目录执行。推理需要 Metal 或 CUDA GPU，模型转换在 CPU 上执行。
-Linux/CUDA 安装方式、环境检查与常见问题见[环境配置说明](docs/zh/environment.md)。
+安装会自动创建 `.venv`，默认使用原生 MLX，不安装扩展，也不需要 Xcode。
+满足扩展要求时，可额外执行：
+
+```sh
+uv sync --locked --extra metal
+```
+
+程序会根据运行环境自动选择可用的加速方式。
+
+后续命令均在仓库根目录执行，无需激活虚拟环境。推理需要 Metal 或 CUDA GPU，模型转换在 CPU 上执行。
 
 ## 快速开始
 
 ### 1. 模型下载
 
-**推荐使用 Spark-X2.6-4B-INT4。** 从以下任一平台将模型文件下载到本地目录。
-两种格式均可作为第二步的转换输入。
+从以下任一平台下载文件。主模型需要包含配置、分词器和 Safetensors 权重的完整目录；
+DSpark 草稿只需下载对应的 BF16 GGUF 文件。
 
-| 模型 | 格式 | Hugging Face | 魔搭（ModelScope） |
+| 用途 | 模型仓库 | Hugging Face | 魔搭 |
 | --- | --- | --- | --- |
-| Spark-X2.6-4B | BF16 | [下载](https://huggingface.co/XHToken/Spark-X2.6-4B) | [下载](https://www.modelscope.cn/models/XHToken/Spark-X2.6-4B) |
-| Spark-X2.6-4B-INT4 | INT4 | [下载](https://huggingface.co/XHToken/Spark-X2.6-4B-INT4) | [下载](https://www.modelscope.cn/models/XHToken/Spark-X2.6-4B-INT4) |
+| 4B 主模型 | Spark-X2.6-4B-INT4 | [下载](https://huggingface.co/XHToken/Spark-X2.6-4B-INT4) | [下载](https://www.modelscope.cn/models/XHToken/Spark-X2.6-4B-INT4) |
+| 4B 草稿 | Spark-X2.6-4B-DSpark-GGUF | [下载](https://huggingface.co/XHToken/Spark-X2.6-4B-DSpark-GGUF) | [下载](https://www.modelscope.cn/models/XHToken/Spark-X2.6-4B-DSpark-GGUF/files) |
+| 1.7B 主模型 | Spark-X2.6-1.7B-INT4 | [下载](https://huggingface.co/XHToken/Spark-X2.6-1.7B-INT4) | [下载](https://www.modelscope.cn/models/XHToken/Spark-X2.6-1.7B-INT4) |
+| 1.7B 草稿 | Spark-X2.6-1.7B-DSpark-GGUF | [下载](https://huggingface.co/XHToken/Spark-X2.6-1.7B-DSpark-GGUF) | [下载](https://www.modelscope.cn/models/XHToken/Spark-X2.6-1.7B-DSpark-GGUF/files) |
 
-### 2. 模型量化和转换
+**推荐使用 DSpark 推测解码。** 相比仅使用主模型，DSpark 在 4B 模型上约有 **1.6×** 的加速，
+在 1.7B 模型上约有 **1.2×** 的加速。
+请配套下载主模型与对应的 `Spark-X2.6-4B-DSpark.gguf` 或 `Spark-X2.6-1.7B-DSpark.gguf`，
+主模型与草稿必须按尺寸匹配，生成与服务示例见下文。
 
-将下载的模型转换为 MLX 格式：
+### 2. 生成与聊天
+
+支持直接加载 **compressed-tensors INT4 Safetensors 主模型**和 **BF16 GGUF 格式的 DSpark 草稿**，
+无需提前转换为 MLX 模型。
+
+未显式指定参数时，命令行生成与聊天使用以下默认配置：
+
+| 配置 | 默认值与行为 |
+| --- | --- |
+| 思考模式 | 开启，强度为 `low` |
+| 主模型温度 `temperature` | `0`，使用贪心采样，每步选择概率最高的 token |
+| 主模型 `top_p` | `1`，不进行累计概率截断 |
+| 主模型 `top_k` | `0`，不限制候选 token 数 |
+| DSpark 草稿采样 | 温度、`top_p`、`top_k` 逐项继承主模型；默认同样使用贪心采样 |
+| DSpark 草稿精度 | 浮点草稿加载时量化为 INT8；已有 INT8/INT4 草稿按保存格式加载 |
+| 输出长度上限 | `512` tokens，包含思考与最终回答 |
+
+温度大于 `0` 时，按 `top_p`、`top_k` 筛选后的概率分布随机采样。
+示例命令中的显式参数会覆盖默认值。
+
+以下以 4B 为例，请将 `/path/to/...` 替换为本地路径；使用 1.7B 时，同时替换主模型与草稿路径。
+
+**DSpark 生成（推荐）：**
 
 ```sh
-.venv/bin/spark-mlx-convert \
-    --source /path/to/Spark-X2.6-4B-INT4 \
-    --output /path/to/Spark-X2.6-4B-MLX
+.venv/bin/python -m spark_mlx_llm.dspark generate \
+    --model /path/to/Spark-X2.6-4B-INT4 \
+    --draft-model /path/to/Spark-X2.6-4B-DSpark.gguf \
+    --prompt '请用一段话解释推测解码。' \
+    --temperature 1 --top-p 0.95 --top-k 0 \
+    --draft-temperature 1 --draft-top-p 1 --draft-top-k 0 \
+    --max-new-tokens 512 --stats
 ```
 
-`--source` 为第一步下载的本地目录，`--output` 必须是尚不存在的新目录。
-默认转换采用 INT4/INT8/BF16 混合精度权重，具体方案见下方[量化与兼容性说明](#量化与兼容性说明)，
-完整转换选项见[模型转换文档](docs/zh/conversion.md)。
+主模型通过 `--model` 指定，配套草稿通过 `--draft-model` 指定。
+主模型也支持已转换的 MLX 目录，草稿也支持已导出的 MLX Safetensors 目录。
+上例采用随机采样：主模型温度为 `1`、`top_p=0.95`，草稿温度为 `1`、`top_p=1`，两侧均不限制 `top_k`。
 
-### 3. 使用
-
-**将第二步转换得到的输出目录传给 `--model`**，即可加载模型进行推理。
-
-生成一次回答：
-
-```sh
-.venv/bin/spark-mlx-generate \
-    --model /path/to/Spark-X2.6-4B-MLX \
-    --prompt '你好，请介绍一下自己。' \
-    --max-tokens 256 \
-    --no-thinking
-```
-
-启动交互式聊天：
+**DSpark 交互式聊天：**
 
 ```sh
 .venv/bin/spark-mlx-chat \
-    --model /path/to/Spark-X2.6-4B-MLX \
-    --no-thinking
+    --model /path/to/Spark-X2.6-4B-INT4 \
+    --draft-model /path/to/Spark-X2.6-4B-DSpark.gguf
 ```
 
-以上示例通过 `--no-thinking` 关闭思考。模型模板支持思考时，可将它替换为
-`--thinking --reasoning-effort low`（或 `high`）。`--max-tokens` 限制思考与最终回答的
-总长度，开启思考后可按需调大，详见[思考模式说明](docs/zh/examples.md#思考模式)。
+该命令同时加载主模型与配套草稿，使用 DSpark 进行多轮对话。
 
-### 4. 启动 HTTP 服务
+`--max-tokens` 包含思考与最终回答的总长度，可按需调大。
+其他思考模式见[思考模式说明](docs/zh/examples.md#思考模式)。
 
-在本机提供转换后模型的 HTTP 服务：
-
-```sh
-.venv/bin/spark-mlx-server \
-    --model /path/to/Spark-X2.6-4B-MLX \
-    --host 127.0.0.1 \
-    --port 8080 \
-    --no-thinking
-```
-
-保持该终端运行，在另一个终端或应用中向 `http://127.0.0.1:8080` 发送请求，
-使用 Ctrl-C 停止服务。聊天、流式响应和文本续写的请求方式见
-[HTTP 调用示例](docs/zh/examples.md#4-http-聊天流式聊天和文本续写)。
-
-`generate`、`chat`、`server`、Python 普通与流式生成 API，以及 HTTP 请求的完整用法见
-[接口使用说明](docs/zh/examples.md)。
-
-## DSpark 模型使用
-
-DSpark 需要本地的**主模型与草稿模型合并检查点**，目录包含带 DSpark 配置的
-`config.json`、分词器文件，以及含 `draft_model.*` 张量的 Safetensors 权重。
-加载器支持 BF16 或 MLX 仿射量化的主模型，草稿模型保持未量化。
-仅含主模型权重的普通 Spark 检查点不能直接开启 DSpark。
-
-完成环境安装后，在仓库根目录运行：
-
-```sh
-# 检查配置与草稿权重形状，不加载权重数据。
-.venv/bin/python -m spark_mlx_llm.dspark inspect /path/to/merged-checkpoint
-
-# 使用 DSpark 生成，默认贪心采样、整块验证。
-.venv/bin/python -m spark_mlx_llm.dspark generate \
-    --model /path/to/merged-checkpoint \
-    --prompt '请用一段话解释推测解码。' \
-    --max-new-tokens 512 --stats
-
-# 主模型随机采样，草稿模型使用贪心。
-.venv/bin/python -m spark_mlx_llm.dspark generate \
-    --model /path/to/merged-checkpoint \
-    --prompt '请写一个关于机器人的短故事。' \
-    --temperature 1 --top-p 0.95 --top-k 0 \
-    --draft-temperature 0 --draft-top-p 1 --draft-top-k 0 \
-    --max-new-tokens 512 --stats
-```
-
-在生成命令后追加 `--mode baseline`，可使用同一合并检查点仅运行主模型生成。
-未指定的 draft 采样参数逐项继承主模型设置；`--max-draft-tokens N` 限制每轮候选数，
-设为零则禁用草稿生成。`--stats` 将统计写入 stderr，`--json` 以 JSON 返回文本和指标。
-默认应用模型聊天模板，`--raw-prompt` 可跳过模板。
-
-Python 接口支持相同配置：
+<details>
+<summary>Python 生成示例</summary>
 
 ```python
 from spark_mlx_llm.dspark import SamplingOptions, generate, load_pair
 
-pair = load_pair("/path/to/merged-checkpoint")
+pair = load_pair(
+    "/path/to/Spark-X2.6-4B-INT4",
+    draft_path="/path/to/Spark-X2.6-4B-DSpark.gguf",
+)
 result = generate(
     pair,
     "请解释推测解码。",
@@ -170,14 +145,110 @@ print(result.text)
 print(result.draft_acceptance_rate, result.mean_acceptance_length)
 ```
 
-当前 DSpark 一次处理一个请求。完整命令行参数可运行
+普通生成与流式生成 API 见[接口使用说明](docs/zh/examples.md)。
+
+</details>
+
+<details>
+<summary>更多选项：采样参数与草稿精度</summary>
+
+#### 采样与生成参数
+
+DSpark `generate` 的常用参数如下，完整参数可运行
 `.venv/bin/python -m spark_mlx_llm.dspark generate --help` 查看。
+
+| 参数 | 作用 |
+| --- | --- |
+| `--mode baseline` | 仅运行主模型，便于与 DSpark 对比 |
+| `--temperature` / `--top-p` / `--top-k` | 主模型采样；默认温度为 `0`，使用贪心采样 |
+| `--draft-temperature` / `--draft-top-p` / `--draft-top-k` | 草稿采样；未指定的字段逐项继承主模型设置 |
+| `--max-draft-tokens N` | 限制每轮候选数；`0` 禁用草稿生成 |
+| `--max-new-tokens N` | 限制生成长度；普通生成入口对应参数为 `--max-tokens` |
+| `--stats` / `--json` | 将统计写入 stderr / 以 JSON 返回文本和指标 |
+| `--raw-prompt` | 跳过默认应用的聊天模板 |
+
+#### 草稿精度选项
+
+浮点草稿默认在加载时量化为 INT8，已有 INT8/INT4 草稿直接按文件中的格式恢复。
+如需保留浮点精度或改用 INT4，可通过 `--draft-quantization` 显式选择。
+
+| `--draft-quantization` | 行为 |
+| --- | --- |
+| 不指定（默认） | 浮点草稿量化为 INT8；本项目已量化的 MLX 草稿按原格式恢复 |
+| `checkpoint` | 保留文件记录的精度，直接加载浮点或本项目已量化的 MLX 草稿 |
+| `bf16` | 保留浮点草稿权重；已有量化草稿需使用 `checkpoint` 或相同量化方案 |
+| `int8` | 主要线性投影使用对称、逐输出通道 INT8，scale 为 FP32 |
+| `int4` | QKV、FFN gate/up/down 使用非对称 INT4/G32，其余主要投影使用 INT8 |
+
+| 草稿模块 | `int8` | `int4` |
+| --- | --- | --- |
+| Attention QKV、FFN gate/up/down | 对称 per-channel INT8，FP32 scale | 非对称 INT4/G32，BF16 scale/offset |
+| 特征融合 `fc`、attention `out_proj`、Markov 输出投影 | 对称 per-channel INT8，FP32 scale | 对称 per-channel INT8，FP32 scale |
+| 独立草稿 `lm_head`（如存在） | 对称 per-channel INT8 | 对称 per-channel INT8 |
+| Token/Markov embedding、attention gate、归一化、置信度头 | 保留浮点 | 保留浮点 |
+| 共享主模型输出头 | 沿用所选 readout 策略 | 沿用所选 readout 策略 |
+
+量化不改写主模型或源文件，接受/拒绝校正使用量化后草稿的实际提议概率。
+专用 W8 内核不可用时，使用量化权重的浮点计算回退，不保留原 BF16 线性层副本。
+Python 的 `load_pair()` 使用相同默认值，通过 `pair.draft_quantization` 查看实际量化模块。
+这些规则也适用于合并目录中的浮点草稿。
+
+</details>
+
+### 3. 启动 HTTP 服务
+
+**DSpark 服务（推荐）：** 直接传入主模型目录与配套草稿文件。
+
+```sh
+.venv/bin/spark-mlx-server \
+    --model /path/to/Spark-X2.6-4B-INT4 \
+    --draft-model /path/to/Spark-X2.6-4B-DSpark.gguf \
+    --served-model-name spark-x2.6-4b \
+    --host 127.0.0.1 --port 8080 \
+    --thinking --reasoning-effort low \
+    --draft-quantization int8 \
+    --temperature 1 --top-p 0.95 --top-k 0 \
+    --draft-temperature 1 --draft-top-p 1 --draft-top-k 0 \
+    --max-context-length 262144 \
+    --max-tokens 262144
+```
+
+当前 DSpark 服务一次处理一个请求。
+
+**主模型服务：**
+
+```sh
+.venv/bin/spark-mlx-server \
+    --model /path/to/Spark-X2.6-4B-INT4 \
+    --served-model-name spark-x2.6-4b \
+    --host 127.0.0.1 --port 8080 \
+    --thinking --reasoning-effort low \
+    --temperature 0 --top-p 1 --top-k 0 \
+    --max-tokens 262144
+```
+
+启动其中一种服务并保持终端运行，在另一个终端发送聊天请求：
+
+```sh
+curl --fail-with-body http://127.0.0.1:8080/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -d '{
+      "model": "spark-x2.6-4b",
+      "messages": [{"role": "user", "content": "你好，请介绍一下自己。"}],
+      "stream": false
+    }'
+```
+
+请求中的 `model` 与启动时的 `--served-model-name` 保持一致，这里均为 `spark-x2.6-4b`。
+请求未指定 `max_tokens` 时继承服务配置，也可按请求显式设置，但需满足上下文限制。
+将 `stream` 改为 `true`，并为 curl 添加 `-N`，即可逐段接收 SSE 响应。使用 Ctrl-C 停止服务。
+HTTP 文本续写和完整参数见[接口使用说明](docs/zh/examples.md)。
 
 ## 量化与兼容性说明
 
-默认转换对主模型采用以下方案。解码器内的模块在每层使用相同方案，embedding 和
-`lm_head` 为模型级模块。激活列描述 W8A8 后端可用且启用时的计算方式，
-权重与 scale 列描述转换后 checkpoint 的存储格式。
+上述两款官方 INT4 主模型采用以下混合精度方案。加载或转换时保留已有整数权重编码，
+将 scale/offset 适配为 MLX 存储表达；类型转换与舍入可能影响数值结果。
+激活列描述 W8A8 后端可用且启用时的计算方式。
 
 | 层 / 模块 | 权重量化方式 | 激活（启用 W8A8 时） | 权重 scale 类型 |
 | --- | --- | --- | --- |
@@ -191,13 +262,8 @@ print(result.draft_acceptance_rate, result.mean_acceptance_length)
 | `model.embedding` | 保留 BF16，不量化 | — | — |
 | RMSNorm | 保留 BF16，不量化 | 不量化 | — |
 
-转换器默认使用 `--w8-backend w8a8`。加载模型时若 W8A8 不可用，W8 层保留使用
-浮点激活的 MLX affine 路径；也可以在转换命令中加入 `--w8-backend native`
-显式选择该路径。W8 权重保持不变，浮点激活与 INT8 激活路径的数值结果可能不同。
-转换选项与精度细节见[模型转换文档](docs/zh/conversion.md)。
-
-所有生成入口默认保留模型精度，不量化 KV cache：**BF16 模型使用 BF16 KV**，
-全局注意力层与滑动窗口层均如此。如需对全局注意力层启用 INT8/G32 KV，
+所有生成入口默认保留模型精度，不量化 KV cache：**BF16 模型使用 BF16 KV**。
+如需对全局注意力层启用 INT8/G32 KV，
 可向 `spark-mlx-generate` 显式传入 `--kv-bits 8`，或向本包 Python 生成函数传入
 `kv_bits=8`。generate 与 Python 包装默认按 512 tokens 分块处理输入，chat/server
 保留上游 MLX LM 的分块行为。这些设置与权重量化分别控制，详见
@@ -210,10 +276,12 @@ print(result.draft_acceptance_rate, result.mean_acceptance_length)
 | 主题 | 文档 |
 | --- | --- |
 | 安装、平台要求与常见问题 | [环境配置](docs/zh/environment.md) |
-| CLI、Python、HTTP 与思考模式 | [接口使用说明](docs/zh/examples.md) |
-| 模型转换与量化 | [模型转换](docs/zh/conversion.md) |
+| 预编译发布包的解压、诊断与模型部署 | [发布包使用指南](docs/zh/release-package.md) |
+| CLI、Python、HTTP、思考模式与 KV 缓存 | [接口使用说明](docs/zh/examples.md) |
+| 模型格式转换与精度说明 | [模型转换](docs/zh/conversion.md) |
 | 性能测试命令与指标口径 | [Benchmark 指南](docs/zh/benchmark.md) |
-| DSpark 生成、采样与 Python 接口 | [DSpark 使用方法](#dspark-模型使用) |
+| 普通与 DSpark 推理 | [生成与聊天](#2-生成与聊天) · [HTTP 服务](#3-启动-http-服务) |
+| Apple Silicon 扩展与算子 | [扩展说明](extensions/spark-mlx-ext/README.zh.md) |
 
 ## 许可证
 

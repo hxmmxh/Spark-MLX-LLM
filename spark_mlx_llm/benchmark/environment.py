@@ -166,8 +166,6 @@ def _entry_kind(
         "lora.py",
         "server.py",
         "benchmark.py",
-        "watch.py",
-        "watch.sh",
     }
     if name in {"mlx-spark", "mlx_spark", "mlx-lm", "mlx_lm", "mlx-vlm", "mlx_vlm"}:
         return (
@@ -176,6 +174,9 @@ def _entry_kind(
             else None
         )
     paths = [*launch_paths, entry]
+    # A generic watcher may only poll a remote machine. Its name plus an MLX
+    # workspace path does not prove local inference; classify actual workload
+    # children and the explicit benchmark queue entry points above instead.
     if any("mlx" in path.lower() for path in paths) and (
         name in tasks | script_tasks
         or re.match(r"(?:bench|benchmark|train|infer|generate)[_.-]", name)

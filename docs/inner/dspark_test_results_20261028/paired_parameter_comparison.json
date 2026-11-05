@@ -1,0 +1,966 @@
+{
+  "baseline_run": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-all-swa-4096-think-high-temp1-20261027_172807",
+  "new_run": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542",
+  "baseline_parameters": {
+    "dspark_block_size": 8,
+    "target_top_p": 1.0,
+    "draft_top_p": 1.0
+  },
+  "new_parameters": {
+    "dspark_block_size": 7,
+    "target_top_p": 0.95,
+    "draft_top_p": 1.0
+  },
+  "comparison_note": "Paired successful records only; combined effects of target top_p and block size; old baseline is incomplete.",
+  "files": [
+    {
+      "source_file": "aime24_format.json",
+      "paired_records": 30,
+      "old_length_limit_records": 23,
+      "new_length_limit_records": 22,
+      "identical_outputs": 0,
+      "old": {
+        "input_tokens": 5696,
+        "output_tokens": 115109,
+        "inference_seconds": 1444.106381629972,
+        "prefill_seconds": 6.031595830980223,
+        "generation_seconds": 1437.9456993790227,
+        "drafted_tokens": 212477,
+        "accepted_tokens": 88500,
+        "rounds": 26586,
+        "committed_tokens": 115079,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 6,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 7,
+            "drafted_tokens": 7,
+            "accepted_tokens": 7,
+            "draft_acceptance_rate": 1.0
+          },
+          "2": {
+            "rounds": 6,
+            "drafted_tokens": 12,
+            "accepted_tokens": 7,
+            "draft_acceptance_rate": 0.5833333333333334
+          },
+          "3": {
+            "rounds": 7,
+            "drafted_tokens": 21,
+            "accepted_tokens": 11,
+            "draft_acceptance_rate": 0.5238095238095238
+          },
+          "4": {
+            "rounds": 1,
+            "drafted_tokens": 4,
+            "accepted_tokens": 3,
+            "draft_acceptance_rate": 0.75
+          },
+          "5": {
+            "rounds": 7,
+            "drafted_tokens": 35,
+            "accepted_tokens": 18,
+            "draft_acceptance_rate": 0.5142857142857142
+          },
+          "6": {
+            "rounds": 6,
+            "drafted_tokens": 36,
+            "accepted_tokens": 19,
+            "draft_acceptance_rate": 0.5277777777777778
+          },
+          "7": {
+            "rounds": 6,
+            "drafted_tokens": 42,
+            "accepted_tokens": 17,
+            "draft_acceptance_rate": 0.40476190476190477
+          },
+          "8": {
+            "rounds": 26540,
+            "drafted_tokens": 212320,
+            "accepted_tokens": 88418,
+            "draft_acceptance_rate": 0.4164374529012811
+          }
+        },
+        "tokens_per_second": 80.0510061330618,
+        "output_tokens_per_second": 79.70950164355325,
+        "mean_draft_length": 7.992063492063492,
+        "mean_acceptance_length": 4.328556383058753,
+        "draft_acceptance_rate": 0.41651566993133377
+      },
+      "new": {
+        "input_tokens": 5696,
+        "output_tokens": 113459,
+        "inference_seconds": 1361.441428082966,
+        "prefill_seconds": 4.732354583044071,
+        "generation_seconds": 1356.6643830011308,
+        "drafted_tokens": 179217,
+        "accepted_tokens": 87811,
+        "rounds": 25625,
+        "committed_tokens": 113429,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 3,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 7,
+            "drafted_tokens": 7,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.8571428571428571
+          },
+          "2": {
+            "rounds": 9,
+            "drafted_tokens": 18,
+            "accepted_tokens": 16,
+            "draft_acceptance_rate": 0.8888888888888888
+          },
+          "3": {
+            "rounds": 3,
+            "drafted_tokens": 9,
+            "accepted_tokens": 4,
+            "draft_acceptance_rate": 0.4444444444444444
+          },
+          "4": {
+            "rounds": 6,
+            "drafted_tokens": 24,
+            "accepted_tokens": 9,
+            "draft_acceptance_rate": 0.375
+          },
+          "5": {
+            "rounds": 8,
+            "drafted_tokens": 40,
+            "accepted_tokens": 21,
+            "draft_acceptance_rate": 0.525
+          },
+          "6": {
+            "rounds": 4,
+            "drafted_tokens": 24,
+            "accepted_tokens": 13,
+            "draft_acceptance_rate": 0.5416666666666666
+          },
+          "7": {
+            "rounds": 25585,
+            "drafted_tokens": 179095,
+            "accepted_tokens": 87742,
+            "draft_acceptance_rate": 0.4899187582009548
+          }
+        },
+        "tokens_per_second": 83.6308533058212,
+        "output_tokens_per_second": 83.33740817609807,
+        "mean_draft_length": 6.993834146341463,
+        "mean_acceptance_length": 4.426497560975609,
+        "draft_acceptance_rate": 0.4899702595177913
+      }
+    },
+    {
+      "source_file": "aime25_format_30.json",
+      "paired_records": 30,
+      "old_length_limit_records": 22,
+      "new_length_limit_records": 23,
+      "identical_outputs": 0,
+      "old": {
+        "input_tokens": 8288,
+        "output_tokens": 110647,
+        "inference_seconds": 1409.82571487705,
+        "prefill_seconds": 9.791297790972749,
+        "generation_seconds": 1399.9503340410593,
+        "drafted_tokens": 205122,
+        "accepted_tokens": 84957,
+        "rounds": 25668,
+        "committed_tokens": 110617,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 6,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 6,
+            "drafted_tokens": 6,
+            "accepted_tokens": 5,
+            "draft_acceptance_rate": 0.8333333333333334
+          },
+          "2": {
+            "rounds": 7,
+            "drafted_tokens": 14,
+            "accepted_tokens": 9,
+            "draft_acceptance_rate": 0.6428571428571429
+          },
+          "3": {
+            "rounds": 5,
+            "drafted_tokens": 15,
+            "accepted_tokens": 11,
+            "draft_acceptance_rate": 0.7333333333333333
+          },
+          "4": {
+            "rounds": 9,
+            "drafted_tokens": 36,
+            "accepted_tokens": 17,
+            "draft_acceptance_rate": 0.4722222222222222
+          },
+          "5": {
+            "rounds": 5,
+            "drafted_tokens": 25,
+            "accepted_tokens": 8,
+            "draft_acceptance_rate": 0.32
+          },
+          "6": {
+            "rounds": 3,
+            "drafted_tokens": 18,
+            "accepted_tokens": 9,
+            "draft_acceptance_rate": 0.5
+          },
+          "7": {
+            "rounds": 8,
+            "drafted_tokens": 56,
+            "accepted_tokens": 22,
+            "draft_acceptance_rate": 0.39285714285714285
+          },
+          "8": {
+            "rounds": 25619,
+            "drafted_tokens": 204952,
+            "accepted_tokens": 84876,
+            "draft_acceptance_rate": 0.41412623443538
+          }
+        },
+        "tokens_per_second": 79.0363752981217,
+        "output_tokens_per_second": 78.48275062116416,
+        "mean_draft_length": 7.991351098644226,
+        "mean_acceptance_length": 4.309529375097398,
+        "draft_acceptance_rate": 0.4141779038815924
+      },
+      "new": {
+        "input_tokens": 8288,
+        "output_tokens": 111956,
+        "inference_seconds": 1361.6030015010037,
+        "prefill_seconds": 5.734755500045139,
+        "generation_seconds": 1355.8316841270134,
+        "drafted_tokens": 177681,
+        "accepted_tokens": 86532,
+        "rounds": 25400,
+        "committed_tokens": 111926,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 2,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 5,
+            "drafted_tokens": 5,
+            "accepted_tokens": 4,
+            "draft_acceptance_rate": 0.8
+          },
+          "2": {
+            "rounds": 4,
+            "drafted_tokens": 8,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.75
+          },
+          "3": {
+            "rounds": 7,
+            "drafted_tokens": 21,
+            "accepted_tokens": 18,
+            "draft_acceptance_rate": 0.8571428571428571
+          },
+          "4": {
+            "rounds": 3,
+            "drafted_tokens": 12,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.5
+          },
+          "5": {
+            "rounds": 7,
+            "drafted_tokens": 35,
+            "accepted_tokens": 27,
+            "draft_acceptance_rate": 0.7714285714285715
+          },
+          "6": {
+            "rounds": 4,
+            "drafted_tokens": 24,
+            "accepted_tokens": 14,
+            "draft_acceptance_rate": 0.5833333333333334
+          },
+          "7": {
+            "rounds": 25368,
+            "drafted_tokens": 177576,
+            "accepted_tokens": 86457,
+            "draft_acceptance_rate": 0.4868732261116367
+          }
+        },
+        "tokens_per_second": 82.57367143037796,
+        "output_tokens_per_second": 82.22367303581291,
+        "mean_draft_length": 6.995314960629921,
+        "mean_acceptance_length": 4.406535433070866,
+        "draft_acceptance_rate": 0.4870076147702906
+      }
+    },
+    {
+      "source_file": "alpaca_format_80.json",
+      "paired_records": 80,
+      "old_length_limit_records": 27,
+      "new_length_limit_records": 11,
+      "identical_outputs": 0,
+      "old": {
+        "input_tokens": 6863,
+        "output_tokens": 154347,
+        "inference_seconds": 3084.891051420913,
+        "prefill_seconds": 9.367239502054872,
+        "generation_seconds": 3075.4562201719673,
+        "drafted_tokens": 460973,
+        "accepted_tokens": 96644,
+        "rounds": 57668,
+        "committed_tokens": 154267,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 13,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 10,
+            "drafted_tokens": 10,
+            "accepted_tokens": 8,
+            "draft_acceptance_rate": 0.8
+          },
+          "2": {
+            "rounds": 9,
+            "drafted_tokens": 18,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.3333333333333333
+          },
+          "3": {
+            "rounds": 9,
+            "drafted_tokens": 27,
+            "accepted_tokens": 13,
+            "draft_acceptance_rate": 0.48148148148148145
+          },
+          "4": {
+            "rounds": 7,
+            "drafted_tokens": 28,
+            "accepted_tokens": 16,
+            "draft_acceptance_rate": 0.5714285714285714
+          },
+          "5": {
+            "rounds": 13,
+            "drafted_tokens": 65,
+            "accepted_tokens": 23,
+            "draft_acceptance_rate": 0.35384615384615387
+          },
+          "6": {
+            "rounds": 12,
+            "drafted_tokens": 72,
+            "accepted_tokens": 16,
+            "draft_acceptance_rate": 0.2222222222222222
+          },
+          "7": {
+            "rounds": 7,
+            "drafted_tokens": 49,
+            "accepted_tokens": 13,
+            "draft_acceptance_rate": 0.2653061224489796
+          },
+          "8": {
+            "rounds": 57588,
+            "drafted_tokens": 460704,
+            "accepted_tokens": 96549,
+            "draft_acceptance_rate": 0.2095683996665972
+          }
+        },
+        "tokens_per_second": 50.1867004276099,
+        "output_tokens_per_second": 50.03320941558282,
+        "mean_draft_length": 7.993566622737046,
+        "mean_acceptance_length": 2.675088437261566,
+        "draft_acceptance_rate": 0.20965219221082362
+      },
+      "new": {
+        "input_tokens": 6863,
+        "output_tokens": 113876,
+        "inference_seconds": 2106.1404927521944,
+        "prefill_seconds": 8.857584960118402,
+        "generation_seconds": 2097.2312731251295,
+        "drafted_tokens": 279211,
+        "accepted_tokens": 73950,
+        "rounds": 39904,
+        "committed_tokens": 113796,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 3,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 7,
+            "drafted_tokens": 7,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.8571428571428571
+          },
+          "2": {
+            "rounds": 3,
+            "drafted_tokens": 6,
+            "accepted_tokens": 4,
+            "draft_acceptance_rate": 0.6666666666666666
+          },
+          "3": {
+            "rounds": 4,
+            "drafted_tokens": 12,
+            "accepted_tokens": 2,
+            "draft_acceptance_rate": 0.16666666666666666
+          },
+          "4": {
+            "rounds": 3,
+            "drafted_tokens": 12,
+            "accepted_tokens": 3,
+            "draft_acceptance_rate": 0.25
+          },
+          "5": {
+            "rounds": 4,
+            "drafted_tokens": 20,
+            "accepted_tokens": 7,
+            "draft_acceptance_rate": 0.35
+          },
+          "6": {
+            "rounds": 6,
+            "drafted_tokens": 36,
+            "accepted_tokens": 13,
+            "draft_acceptance_rate": 0.3611111111111111
+          },
+          "7": {
+            "rounds": 39874,
+            "drafted_tokens": 279118,
+            "accepted_tokens": 73915,
+            "draft_acceptance_rate": 0.26481631424702096
+          }
+        },
+        "tokens_per_second": 54.29825573328921,
+        "output_tokens_per_second": 54.068567786374395,
+        "mean_draft_length": 6.997067963111467,
+        "mean_acceptance_length": 2.8517441860465116,
+        "draft_acceptance_rate": 0.26485346207706717
+      }
+    },
+    {
+      "source_file": "arena-hard-v2-format-80.json",
+      "paired_records": 79,
+      "old_length_limit_records": 75,
+      "new_length_limit_records": 75,
+      "identical_outputs": 0,
+      "old": {
+        "input_tokens": 45503,
+        "output_tokens": 317819,
+        "inference_seconds": 5912.56860220604,
+        "prefill_seconds": 26.430741830845363,
+        "generation_seconds": 5885.978180959908,
+        "drafted_tokens": 862270,
+        "accepted_tokens": 209836,
+        "rounds": 107907,
+        "committed_tokens": 317740,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 28,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 30,
+            "drafted_tokens": 30,
+            "accepted_tokens": 20,
+            "draft_acceptance_rate": 0.6666666666666666
+          },
+          "2": {
+            "rounds": 30,
+            "drafted_tokens": 60,
+            "accepted_tokens": 30,
+            "draft_acceptance_rate": 0.5
+          },
+          "3": {
+            "rounds": 23,
+            "drafted_tokens": 69,
+            "accepted_tokens": 34,
+            "draft_acceptance_rate": 0.4927536231884058
+          },
+          "4": {
+            "rounds": 30,
+            "drafted_tokens": 120,
+            "accepted_tokens": 55,
+            "draft_acceptance_rate": 0.4583333333333333
+          },
+          "5": {
+            "rounds": 20,
+            "drafted_tokens": 100,
+            "accepted_tokens": 33,
+            "draft_acceptance_rate": 0.33
+          },
+          "6": {
+            "rounds": 26,
+            "drafted_tokens": 156,
+            "accepted_tokens": 44,
+            "draft_acceptance_rate": 0.28205128205128205
+          },
+          "7": {
+            "rounds": 25,
+            "drafted_tokens": 175,
+            "accepted_tokens": 41,
+            "draft_acceptance_rate": 0.2342857142857143
+          },
+          "8": {
+            "rounds": 107695,
+            "drafted_tokens": 861560,
+            "accepted_tokens": 209579,
+            "draft_acceptance_rate": 0.2432552579042667
+          }
+        },
+        "tokens_per_second": 53.99595279304431,
+        "output_tokens_per_second": 53.753118379280785,
+        "mean_draft_length": 7.990862501969288,
+        "mean_acceptance_length": 2.9445726412558964,
+        "draft_acceptance_rate": 0.2433530100780498
+      },
+      "new": {
+        "input_tokens": 45503,
+        "output_tokens": 311845,
+        "inference_seconds": 5110.741288910911,
+        "prefill_seconds": 25.855042913957732,
+        "generation_seconds": 5084.756912250974,
+        "drafted_tokens": 664559,
+        "accepted_tokens": 216754,
+        "rounds": 95015,
+        "committed_tokens": 311766,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 22,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 13,
+            "drafted_tokens": 13,
+            "accepted_tokens": 12,
+            "draft_acceptance_rate": 0.9230769230769231
+          },
+          "2": {
+            "rounds": 21,
+            "drafted_tokens": 42,
+            "accepted_tokens": 33,
+            "draft_acceptance_rate": 0.7857142857142857
+          },
+          "3": {
+            "rounds": 18,
+            "drafted_tokens": 54,
+            "accepted_tokens": 40,
+            "draft_acceptance_rate": 0.7407407407407407
+          },
+          "4": {
+            "rounds": 25,
+            "drafted_tokens": 100,
+            "accepted_tokens": 49,
+            "draft_acceptance_rate": 0.49
+          },
+          "5": {
+            "rounds": 17,
+            "drafted_tokens": 85,
+            "accepted_tokens": 37,
+            "draft_acceptance_rate": 0.43529411764705883
+          },
+          "6": {
+            "rounds": 28,
+            "drafted_tokens": 168,
+            "accepted_tokens": 54,
+            "draft_acceptance_rate": 0.32142857142857145
+          },
+          "7": {
+            "rounds": 94871,
+            "drafted_tokens": 664097,
+            "accepted_tokens": 216529,
+            "draft_acceptance_rate": 0.3260502607299837
+          }
+        },
+        "tokens_per_second": 61.329382187112095,
+        "output_tokens_per_second": 61.017567192577175,
+        "mean_draft_length": 6.994253538914908,
+        "mean_acceptance_length": 3.2812292795874334,
+        "draft_acceptance_rate": 0.32616216167413276
+      }
+    },
+    {
+      "source_file": "gsm8k_format_80.json",
+      "paired_records": 80,
+      "old_length_limit_records": 1,
+      "new_length_limit_records": 2,
+      "identical_outputs": 0,
+      "old": {
+        "input_tokens": 11571,
+        "output_tokens": 52483,
+        "inference_seconds": 652.1531619159505,
+        "prefill_seconds": 10.202379964059219,
+        "generation_seconds": 641.9180034118181,
+        "drafted_tokens": 97464,
+        "accepted_tokens": 40292,
+        "rounds": 12185,
+        "committed_tokens": 52403,
+        "draft_length_stats": {
+          "2": {
+            "rounds": 1,
+            "drafted_tokens": 2,
+            "accepted_tokens": 2,
+            "draft_acceptance_rate": 1.0
+          },
+          "3": {
+            "rounds": 1,
+            "drafted_tokens": 3,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "5": {
+            "rounds": 1,
+            "drafted_tokens": 5,
+            "accepted_tokens": 1,
+            "draft_acceptance_rate": 0.2
+          },
+          "6": {
+            "rounds": 1,
+            "drafted_tokens": 6,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "8": {
+            "rounds": 12181,
+            "drafted_tokens": 97448,
+            "accepted_tokens": 40289,
+            "draft_acceptance_rate": 0.4134410146950168
+          }
+        },
+        "tokens_per_second": 81.75966357237358,
+        "output_tokens_per_second": 80.47649396625023,
+        "mean_draft_length": 7.9986869101354126,
+        "mean_acceptance_length": 4.300615510874025,
+        "draft_acceptance_rate": 0.41340392349995897
+      },
+      "new": {
+        "input_tokens": 11571,
+        "output_tokens": 55074,
+        "inference_seconds": 652.9360467090737,
+        "prefill_seconds": 9.848980664799456,
+        "generation_seconds": 643.0614974580822,
+        "drafted_tokens": 86828,
+        "accepted_tokens": 42660,
+        "rounds": 12405,
+        "committed_tokens": 54994,
+        "draft_length_stats": {
+          "1": {
+            "rounds": 1,
+            "drafted_tokens": 1,
+            "accepted_tokens": 1,
+            "draft_acceptance_rate": 1.0
+          },
+          "6": {
+            "rounds": 1,
+            "drafted_tokens": 6,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 1.0
+          },
+          "7": {
+            "rounds": 12403,
+            "drafted_tokens": 86821,
+            "accepted_tokens": 42653,
+            "draft_acceptance_rate": 0.4912751523248984
+          }
+        },
+        "tokens_per_second": 85.64344190672057,
+        "output_tokens_per_second": 84.3482302402874,
+        "mean_draft_length": 6.999435711406691,
+        "mean_acceptance_length": 4.433212414349053,
+        "draft_acceptance_rate": 0.49131616529230204
+      }
+    },
+    {
+      "source_file": "humaneval_format_80.json",
+      "paired_records": 11,
+      "old_length_limit_records": 5,
+      "new_length_limit_records": 4,
+      "identical_outputs": 0,
+      "old": {
+        "input_tokens": 2272,
+        "output_tokens": 25806,
+        "inference_seconds": 447.5067956690327,
+        "prefill_seconds": 1.8614801239455119,
+        "generation_seconds": 445.63002929100185,
+        "drafted_tokens": 65079,
+        "accepted_tokens": 17654,
+        "rounds": 8146,
+        "committed_tokens": 25795,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 3,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 4,
+            "drafted_tokens": 4,
+            "accepted_tokens": 2,
+            "draft_acceptance_rate": 0.5
+          },
+          "2": {
+            "rounds": 2,
+            "drafted_tokens": 4,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "3": {
+            "rounds": 1,
+            "drafted_tokens": 3,
+            "accepted_tokens": 1,
+            "draft_acceptance_rate": 0.3333333333333333
+          },
+          "4": {
+            "rounds": 3,
+            "drafted_tokens": 12,
+            "accepted_tokens": 4,
+            "draft_acceptance_rate": 0.3333333333333333
+          },
+          "5": {
+            "rounds": 2,
+            "drafted_tokens": 10,
+            "accepted_tokens": 3,
+            "draft_acceptance_rate": 0.3
+          },
+          "7": {
+            "rounds": 2,
+            "drafted_tokens": 14,
+            "accepted_tokens": 3,
+            "draft_acceptance_rate": 0.21428571428571427
+          },
+          "8": {
+            "rounds": 8129,
+            "drafted_tokens": 65032,
+            "accepted_tokens": 17641,
+            "draft_acceptance_rate": 0.2712664534383073
+          }
+        },
+        "tokens_per_second": 57.90902386236716,
+        "output_tokens_per_second": 57.66616339628865,
+        "mean_draft_length": 7.989074392339798,
+        "mean_acceptance_length": 3.1665848269089123,
+        "draft_acceptance_rate": 0.271270302248037
+      },
+      "new": {
+        "input_tokens": 2272,
+        "output_tokens": 21061,
+        "inference_seconds": 294.378332877066,
+        "prefill_seconds": 1.7748764159914572,
+        "generation_seconds": 292.5971144180221,
+        "drafted_tokens": 38647,
+        "accepted_tokens": 15530,
+        "rounds": 5526,
+        "committed_tokens": 21050,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 1,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 3,
+            "drafted_tokens": 3,
+            "accepted_tokens": 2,
+            "draft_acceptance_rate": 0.6666666666666666
+          },
+          "3": {
+            "rounds": 1,
+            "drafted_tokens": 3,
+            "accepted_tokens": 1,
+            "draft_acceptance_rate": 0.3333333333333333
+          },
+          "4": {
+            "rounds": 1,
+            "drafted_tokens": 4,
+            "accepted_tokens": 4,
+            "draft_acceptance_rate": 1.0
+          },
+          "5": {
+            "rounds": 1,
+            "drafted_tokens": 5,
+            "accepted_tokens": 3,
+            "draft_acceptance_rate": 0.6
+          },
+          "6": {
+            "rounds": 1,
+            "drafted_tokens": 6,
+            "accepted_tokens": 2,
+            "draft_acceptance_rate": 0.3333333333333333
+          },
+          "7": {
+            "rounds": 5518,
+            "drafted_tokens": 38626,
+            "accepted_tokens": 15518,
+            "draft_acceptance_rate": 0.4017501165018381
+          }
+        },
+        "tokens_per_second": 71.97952051540389,
+        "output_tokens_per_second": 71.54398828936635,
+        "mean_draft_length": 6.9936663047412235,
+        "mean_acceptance_length": 3.809265291349982,
+        "draft_acceptance_rate": 0.4018423163505576
+      }
+    }
+  ],
+  "total": {
+    "source_file": "TOTAL",
+    "paired_records": 310,
+    "old_length_limit_records": 153,
+    "new_length_limit_records": 137,
+    "identical_outputs": 0,
+    "old": {
+      "input_tokens": 80193,
+      "output_tokens": 776211,
+      "inference_seconds": 12951.051707718958,
+      "prefill_seconds": 63.68473504285794,
+      "generation_seconds": 12886.878467254777,
+      "drafted_tokens": 1903385,
+      "accepted_tokens": 537883,
+      "rounds": 238160,
+      "committed_tokens": 775901,
+      "draft_length_stats": {
+        "0": {
+          "rounds": 56,
+          "drafted_tokens": 0,
+          "accepted_tokens": 0,
+          "draft_acceptance_rate": 0.0
+        },
+        "1": {
+          "rounds": 57,
+          "drafted_tokens": 57,
+          "accepted_tokens": 42,
+          "draft_acceptance_rate": 0.7368421052631579
+        },
+        "2": {
+          "rounds": 55,
+          "drafted_tokens": 110,
+          "accepted_tokens": 54,
+          "draft_acceptance_rate": 0.4909090909090909
+        },
+        "3": {
+          "rounds": 46,
+          "drafted_tokens": 138,
+          "accepted_tokens": 70,
+          "draft_acceptance_rate": 0.5072463768115942
+        },
+        "4": {
+          "rounds": 50,
+          "drafted_tokens": 200,
+          "accepted_tokens": 95,
+          "draft_acceptance_rate": 0.475
+        },
+        "5": {
+          "rounds": 48,
+          "drafted_tokens": 240,
+          "accepted_tokens": 86,
+          "draft_acceptance_rate": 0.35833333333333334
+        },
+        "6": {
+          "rounds": 48,
+          "drafted_tokens": 288,
+          "accepted_tokens": 88,
+          "draft_acceptance_rate": 0.3055555555555556
+        },
+        "7": {
+          "rounds": 48,
+          "drafted_tokens": 336,
+          "accepted_tokens": 96,
+          "draft_acceptance_rate": 0.2857142857142857
+        },
+        "8": {
+          "rounds": 237752,
+          "drafted_tokens": 1902016,
+          "accepted_tokens": 537352,
+          "draft_acceptance_rate": 0.282517076617652
+        }
+      },
+      "tokens_per_second": 60.23266239162044,
+      "output_tokens_per_second": 59.93420592532809,
+      "mean_draft_length": 7.9920431642593215,
+      "mean_acceptance_length": 3.2578980517299296,
+      "draft_acceptance_rate": 0.28259285430955905
+    },
+    "new": {
+      "input_tokens": 80193,
+      "output_tokens": 727271,
+      "inference_seconds": 10887.240590833215,
+      "prefill_seconds": 56.803595037956256,
+      "generation_seconds": 10830.142864380352,
+      "drafted_tokens": 1426143,
+      "accepted_tokens": 523237,
+      "rounds": 203875,
+      "committed_tokens": 726961,
+      "draft_length_stats": {
+        "0": {
+          "rounds": 31,
+          "drafted_tokens": 0,
+          "accepted_tokens": 0,
+          "draft_acceptance_rate": 0.0
+        },
+        "1": {
+          "rounds": 36,
+          "drafted_tokens": 36,
+          "accepted_tokens": 31,
+          "draft_acceptance_rate": 0.8611111111111112
+        },
+        "2": {
+          "rounds": 37,
+          "drafted_tokens": 74,
+          "accepted_tokens": 59,
+          "draft_acceptance_rate": 0.7972972972972973
+        },
+        "3": {
+          "rounds": 33,
+          "drafted_tokens": 99,
+          "accepted_tokens": 65,
+          "draft_acceptance_rate": 0.6565656565656566
+        },
+        "4": {
+          "rounds": 38,
+          "drafted_tokens": 152,
+          "accepted_tokens": 71,
+          "draft_acceptance_rate": 0.46710526315789475
+        },
+        "5": {
+          "rounds": 37,
+          "drafted_tokens": 185,
+          "accepted_tokens": 95,
+          "draft_acceptance_rate": 0.5135135135135135
+        },
+        "6": {
+          "rounds": 44,
+          "drafted_tokens": 264,
+          "accepted_tokens": 102,
+          "draft_acceptance_rate": 0.38636363636363635
+        },
+        "7": {
+          "rounds": 203619,
+          "drafted_tokens": 1425333,
+          "accepted_tokens": 522814,
+          "draft_acceptance_rate": 0.36680130187121185
+        }
+      },
+      "tokens_per_second": 67.15248442307698,
+      "output_tokens_per_second": 66.80030572782088,
+      "mean_draft_length": 6.995183323114653,
+      "mean_acceptance_length": 3.565719190680564,
+      "draft_acceptance_rate": 0.36688957558954466
+    }
+  }
+}

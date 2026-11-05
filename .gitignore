@@ -221,3 +221,6 @@ __marimo__/
 *.gputrace
 experiments
 .results
+tests
+benchmark
+spark_mlx_llm/dspark
