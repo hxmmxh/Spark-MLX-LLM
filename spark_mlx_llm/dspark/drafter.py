@@ -134,13 +134,26 @@ class SparkDraftAttention(nn.Module):
         )
 
     def project_context(self, context, *, context_offset):
+        """Append-ready K/V without computing discarded context Q rows."""
         if self.spec is None:
             raise RuntimeError(
                 "Draft attention/RoPE is unresolved; configure layer specs"
             )
-        _, context_k, context_v = mx.split(
-            self.q_k_v_proj(context), [self.q_size, self.q_size + self.kv_size], axis=-1
+        _hidden_shape(context, self.hidden_size, "context")
+        _offset(context_offset, "context_offset")
+        from .draft_ops import _draft_context_projection
+
+        projected = _draft_context_projection(
+            context, self.q_k_v_proj, self.q_size, self.kv_size
         )
+        if projected is None:
+            _, context_k, context_v = mx.split(
+                self.q_k_v_proj(context),
+                [self.q_size, self.q_size + self.kv_size],
+                axis=-1,
+            )
+        else:
+            context_k, context_v = mx.split(projected, [self.kv_size], axis=-1)
         context_k = self.rope(
             self._heads(context_k, self.num_kv_heads), offset=context_offset
         )

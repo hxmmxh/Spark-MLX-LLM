@@ -83,6 +83,7 @@ def stream_generate(
 
     Token IDs include EOS when emitted; result.text excludes the trailing EOS.
     Every call creates its own target and draft caches.
+    max_new_tokens=None removes the output length limit and stops only at EOS.
     Greedy verification defaults to batched; select sequential for correctness tests.
     sampling controls the target; draft_sampling controls draft proposals and defaults
     to a copy of the target policy. Both use SamplingOptions.
@@ -99,8 +100,10 @@ def stream_generate(
         raise ValueError("mode must be baseline or dspark")
     if greedy_verification not in ("sequential", "batched"):
         raise ValueError("greedy_verification must be sequential or batched")
-    if type(max_new_tokens) is not int or max_new_tokens < 0:
-        raise ValueError("max_new_tokens must be a nonnegative integer")
+    if max_new_tokens is not None and (
+        type(max_new_tokens) is not int or max_new_tokens < 0
+    ):
+        raise ValueError("max_new_tokens must be a nonnegative integer or None")
     if type(prefill_chunk_size) is not int or prefill_chunk_size <= 0:
         raise ValueError("prefill_chunk_size must be a positive integer")
     if not 0 <= confidence_threshold <= 1:
@@ -155,8 +158,12 @@ def stream_generate(
     draft_length_stats = {}
     generation_start = time.perf_counter()
     yield TokenEvent(pending, False)
-    while len(result_ids) < max_new_tokens and pending not in eos:
-        count = min(cap, max_new_tokens - len(result_ids) - 1) if speculative else 0
+    while (
+        max_new_tokens is None or len(result_ids) < max_new_tokens
+    ) and pending not in eos:
+        count = cap if speculative else 0
+        if max_new_tokens is not None:
+            count = min(count, max_new_tokens - len(result_ids) - 1)
         proposal = None
         draft = []
         if count:

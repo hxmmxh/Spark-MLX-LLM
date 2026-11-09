@@ -372,9 +372,10 @@ class _QuantizedPerChannelReadout(nn.Module):
 class RuntimeDraftW8Linear(DerivedDraftPerChannelW8Linear):
     """Deployable W8 with a quantized fallback and no retained source module.
 
-    Supported Metal devices use the existing per-channel W8 kernels. Other
-    devices and shapes compute from the same quantized weights in floating
-    point; the original BF16 matrix is not kept as a fallback.
+    FP32 Metal calls with 1..8 rows use direct INT8 reads and FP32 reduction,
+    without expanding the weight matrix. BF16 calls retain the existing W8
+    kernels. Other devices, shapes or unavailable extensions compute from the
+    same quantized weights in floating point; no source BF16 matrix is kept.
     """
 
     def __init__(self, weight, *, bias=None):
@@ -421,6 +422,32 @@ class RuntimeDraftW8Linear(DerivedDraftPerChannelW8Linear):
         self.freeze()
 
     def __call__(self, x):
+        if (
+            isinstance(x, mx.array)
+            and x.dtype == mx.float32
+            and x.ndim >= 1
+            and 1 <= math.prod(x.shape[:-1]) <= 8
+            and self.weight.ndim == 2
+            and min(self.weight.shape) > 0
+            and self.weight.dtype == mx.int8
+            and self.weight.shape[1] == x.shape[-1]
+            and self.scales.dtype == mx.float32
+            and self.scales.shape == (self.weight.shape[0],)
+            and (
+                "bias" not in self
+                or isinstance(self.bias, mx.array)
+                and self.bias.shape == (self.weight.shape[0],)
+                and self.bias.dtype in (mx.float16, mx.bfloat16, mx.float32)
+            )
+            and mx.default_device() == mx.gpu
+            and mx.metal.is_available()
+        ):
+            # Independent of _native_kernels, which guards the BF16/NAX path.
+            # Preserve the module and its stored codes/scales for serialization
+            # and the exact-type checks in compiled Markov sampling.
+            operation = getattr(get_extension(), "w8a32_per_channel", None)
+            if callable(operation):
+                return operation(x, self.weight, self.scales, bias=self.get("bias"))
         if not self._native_kernels:
             return self._fallback(x)
         return super().__call__(x)

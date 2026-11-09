@@ -1,4 +1,4 @@
-"""Optional draft FFN, row-padding and immutable Markov-cache helpers.
+"""Draft context projection and optional FFN, padding and Markov-cache helpers.
 
 The FFN and padding paths preserve source parameters and ordinary fallbacks.
 The Markov helper prepares separate native-M1 bias rows without changing the
@@ -313,11 +313,44 @@ def _draft_context_projection(context, projection, q_size, kv_size):
     """Project only K/V rows when the original projection has exact known semantics."""
     weight = getattr(projection, "weight", None)
     if (
-        context.dtype != mx.bfloat16
-        or not isinstance(weight, mx.array)
+        not isinstance(weight, mx.array)
         or weight.ndim != 2
+        or context.ndim < 2
         or weight.shape[0] != q_size + 2 * kv_size
+        or weight.shape[1] != context.shape[-1]
     ):
+        return None
+    from .draft_quantization import DerivedDraftPerChannelW8Linear, RuntimeDraftW8Linear
+
+    if type(projection) is RuntimeDraftW8Linear and context.dtype == mx.float32:
+        scales = projection.scales
+        bias = projection.get("bias")
+        if (
+            weight.dtype != mx.int8
+            or scales.dtype != mx.float32
+            or scales.shape != (weight.shape[0],)
+            or bias is not None and bias.shape != (weight.shape[0],)
+        ):
+            return None
+        weight, scales = weight[q_size:], scales[q_size:]
+        bias = None if bias is None else bias[q_size:]
+        rows = math.prod(context.shape[:-1])
+        if (
+            1 <= rows <= 8
+            and mx.default_device() == mx.gpu
+            and mx.metal.is_available()
+            and (bias is None or bias.dtype in (mx.float32, mx.float16, mx.bfloat16))
+        ):
+            # This FP32 kernel does not require the BF16/NAX capability flag.
+            operation = getattr(get_extension(), "w8a32_per_channel", None)
+            if callable(operation):
+                return operation(context, weight, scales, bias=bias)
+        # Keep stored-code arithmetic and operation order on CPU, prefill and
+        # older extensions: FP32 dot first, then per-output scale and bias.
+        value = (context @ weight.astype(mx.float32).T) * scales
+        return value + bias if bias is not None else value
+
+    if context.dtype != mx.bfloat16:
         return None
     if type(projection) is nn.Linear:
         if projection.weight.dtype != mx.bfloat16 or (
@@ -328,8 +361,6 @@ def _draft_context_projection(context, projection, q_size, kv_size):
         if "bias" in projection:
             return mx.addmm(projection.bias[q_size:], context, weight.T)
         return context @ weight.T
-
-    from .draft_quantization import DerivedDraftPerChannelW8Linear, RuntimeDraftW8Linear
 
     if not (
         type(projection) in (DerivedDraftPerChannelW8Linear, RuntimeDraftW8Linear)
@@ -371,14 +402,14 @@ def _draft_context_projection(context, projection, q_size, kv_size):
 
 
 class DraftContextKV:
-    """Restorable KV-only context projection for exact draft attention modules.
+    """Compatibility handle for the automatic KV-only context projection.
 
-    Q rows are unused by context commits. This helper slices the current dense
-    BF16 or eligible derived per-channel W8 parameters before projection. Module
-    objects, parameter arrays, head layout and RoPE offsets are preserved.
+    SparkDraftAttention now uses the same helper directly. This restorable
+    experiment handle still records helper/fallback calls without changing
+    module objects, parameter arrays, head layout or RoPE offsets.
     Unsupported/custom projections keep their ordinary full projection call.
-    GPU algorithm selection may change BF16 rounding; validate actual proposals
-    before enabling this experiment in a measured generation candidate.
+    Restoring the handle removes instrumentation; it does not disable the
+    automatic production path. BF16 uses the existing guarded kernel policy.
     """
 
     def __init__(self, drafter):
@@ -496,5 +527,5 @@ class DraftContextKV:
 
 
 def install_draft_context_kv(drafter):
-    """Skip unused context Q rows through an optional restorable projection handle."""
+    """Instrument automatic context projection with a restorable compatibility handle."""
     return DraftContextKV(drafter)

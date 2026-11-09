@@ -51,7 +51,7 @@ followed by OS and Metal GPU check results. Failed checks include the cause.
 
 ## 4. Prepare a model
 
-Download links are listed in the [project overview](../../README.md#1-download-a-model).
+Download links are listed in the [project overview](../../README.md#1-download-models).
 Use an **original compressed-tensors INT4 directory** or a **supported Spark target GGUF file** directly.
 
 Pass the directory or GGUF file path to `--model`. The examples below use
@@ -61,7 +61,7 @@ Pass the directory or GGUF file path to `--model`. The examples below use
 
 The following generation and chat examples use DSpark speculative decoding.
 Alongside the target model, prepare a matching draft. Download links
-are in the [project overview](../../README.md#dspark-models).
+are in the [project overview](../../README.md#1-download-models).
 
 Generate one response:
 

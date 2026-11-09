@@ -23,6 +23,7 @@ from .linear import W8A8Linear
 from .w4a16_qmv import w4a16_qmv
 from .w4a16_multirow import w4a16_multirow, prepare_w4a16_nax4, prepare_w4a16_multirow
 from .w8a16_multirow import w8a16_multirow
+from .w8a32_per_channel import w8a32_per_channel
 from .cached_markov_bias import cached_markov_bias
 
 __all__ = [
@@ -40,5 +41,6 @@ __all__ = [
     "w8a8_linear",
     "w8a16_per_channel",
     "w8a16_multirow",
+    "w8a32_per_channel",
     "cached_markov_bias",
 ]

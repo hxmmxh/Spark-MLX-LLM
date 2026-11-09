@@ -61,6 +61,21 @@ def _source_weights(source):
     return result
 
 
+def _target_model_config(checkpoint_config, model_config=None):
+    """Apply dSpark defaults below checkpoint and explicit caller choices.
+
+    Wide W4 reuses the existing guarded M8 path and needs no packed copies.
+    W8 retains this loader's existing policy; ordinary model defaults are
+    unaffected. Unsupported W4 descriptors fall back in operator dispatch.
+    """
+    return {
+        "w4_qmv_backend": "multirow",
+        "w8_qmv_backend": "native",
+        **checkpoint_config,
+        **(model_config or {}),
+    }
+
+
 def load_pair(
     path,
     *,
@@ -88,6 +103,9 @@ def load_pair(
     model_cache_dir overrides SPARK_MLX_MODEL_CACHE for generated MLX files.
     model_cache=False prepares original compressed-tensors INT4 in memory;
     no converted model or temporary model file is written.
+    Eligible M8 W4 projections default to the wide multirow path. Checkpoint
+    settings and explicit model_config values override loader defaults;
+    model_config={"w4_qmv_backend": "native"} disables this W4 selection.
     """
     from spark_mlx_llm.model import Model, ModelArgs
     from spark_mlx_llm.model_source import (
@@ -134,7 +152,7 @@ def load_pair(
     shared_embedding = raw.get("dspark_shared_embedding", False)
     if type(shared_embedding) is not bool:
         raise ValueError("dspark_shared_embedding must be a boolean")
-    target_config = {"w8_qmv_backend": "native", **raw, **(model_config or {})}
+    target_config = _target_model_config(raw, model_config)
     target_model = Model(ModelArgs.from_dict(target_config))
     draft_checkpoint = source.checkpoint() if source else checkpoint
     drafter = DSparkDrafter.from_spark_config(

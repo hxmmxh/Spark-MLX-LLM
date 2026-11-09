@@ -50,7 +50,10 @@ def build_parser(*, prog=None):
     parser.add_argument(
         "--draft-readout", choices=("checkpoint", "embedding"), default="checkpoint"
     )
-    parser.add_argument("--w4-qmv-backend", default="native")
+    parser.add_argument(
+        "--w4-qmv-backend",
+        help="Default: checkpoint setting, otherwise dSpark multirow",
+    )
     parser.add_argument("--w8-qmv-backend", default="native")
     return parser
 
@@ -355,8 +358,12 @@ def main(argv=None, *, prog=None):
         draft_quantization=args.draft_quantization,
         draft_readout=args.draft_readout,
         model_config={
-            "w4_qmv_backend": args.w4_qmv_backend,
-            "w8_qmv_backend": args.w8_qmv_backend,
+            name: value
+            for name, value in {
+                "w4_qmv_backend": args.w4_qmv_backend,
+                "w8_qmv_backend": args.w8_qmv_backend,
+            }.items()
+            if value is not None
         },
     )
     if args.max_context_length > pair.config.get(

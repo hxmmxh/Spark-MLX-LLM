@@ -13,7 +13,7 @@ Prepare a local model directory containing `config.json`, single-file or sharded
 Safetensors weights, and tokenizer files. The converter reads layer counts,
 hidden dimensions, attention heads, and vocabulary size from the configuration.
 Download the published Spark-X2.6-4B BF16 or INT4 model using the links in the
-[README](../../README.md#1-download-a-model).
+[README](../../README.md#1-download-models).
 
 **Ordinary and DSpark inference accept local original checkpoints directly.**
 BF16/MLX directories load directly; compressed-tensors INT4 defaults to in-memory
@@ -135,7 +135,7 @@ drafts too; the output must be disjoint from both sources.
 To load without exporting a merged directory, generation and the DSpark HTTP
 service accept `--draft-model`. Python uses
 `load_pair(target_path, draft_path=draft_path)`; see the
-[DSpark examples](../../README.md#dspark-models).
+[DSpark examples](../../README.md#2-generation-and-chat).
 
 Conversion preserves the draft's stored precision. Floating drafts default to
 INT8 quantization during loading from the same BF16 GGUF, standalone Safetensors,
