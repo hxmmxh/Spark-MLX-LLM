@@ -7,9 +7,14 @@ Python, MLX, MLX LM, and the project's commands. You do not need to install
 Python, uv, Homebrew, or Xcode, clone the repository, or activate a virtual
 environment. Obtain model weights separately; they are not included in the runtime archive.
 
+Known limitations in 0.1.1: DSpark HTTP streaming can return empty text chunks
+despite reporting generated tokens. This endpoint also rejects text-part lists
+and tool definitions. The bundled Python generation API can process the full
+prompt after rendering messages and tools with the tokenizer's chat template.
+
 ## 1. Check system requirements
 
-The examples use the currently generated `spark-mlx-0.1.0-macos26-arm64.tar.gz`:
+The examples use the currently generated `spark-mlx-0.1.1-macos26-arm64.tar.gz`:
 
 | Component | Requirement |
 | --- | --- |
@@ -25,9 +30,9 @@ Download the archive and its matching `.sha256` file into the same directory.
 Open a terminal there and run:
 
 ```sh
-shasum -a 256 -c spark-mlx-0.1.0-macos26-arm64.tar.gz.sha256
-tar -xzf spark-mlx-0.1.0-macos26-arm64.tar.gz
-cd spark-mlx-0.1.0-macos26-arm64
+shasum -a 256 -c spark-mlx-0.1.1-macos26-arm64.tar.gz.sha256
+tar -xzf spark-mlx-0.1.1-macos26-arm64.tar.gz
+cd spark-mlx-0.1.1-macos26-arm64
 ```
 
 The checksum should report `OK`. Substitute the filenames if using another

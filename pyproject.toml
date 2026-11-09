@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spark-mlx-llm"
-version = "0.1.0"
+version = "0.1.1"
 description = "Spark2_5 inference support for MLX LM"
 readme = "README.md"
 requires-python = ">=3.10"

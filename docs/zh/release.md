@@ -4,7 +4,7 @@
 
 下载预编译包后的操作见[发布包使用指南](release-package.md)（[English](../en/release-package.md)）。
 本文介绍构建工具；默认构建目标与已经生成的具体发布包可能不同，实际系统要求以包内
-`BUILD-INFO.json` 为准。当前已生成的 `spark-mlx-0.1.0-macos26-arm64` 要求 macOS 26.2+。
+`BUILD-INFO.json` 为准。当前已生成的 `spark-mlx-0.1.1-macos26-arm64` 要求 macOS 26.2+。
 
 ## 构建发布包
 
@@ -33,9 +33,9 @@ MetalPerformancePrimitives 的完整 Xcode 工具链。下载依赖时需要网�
 
 ```text
 dist/
-  spark-mlx-0.1.0-macos-arm64.tar.gz
-  spark-mlx-0.1.0-macos-arm64.tar.gz.sha256
-  spark-mlx-0.1.0-macos-arm64.BUILD-INFO.json
+  spark-mlx-0.1.1-macos-arm64.tar.gz
+  spark-mlx-0.1.1-macos-arm64.tar.gz.sha256
+  spark-mlx-0.1.1-macos-arm64.BUILD-INFO.json
 ```
 
 主包版本来自 `pyproject.toml`。已有同名压缩包时不会覆盖；可用 `--name`
@@ -67,7 +67,7 @@ uv run --no-project --python 3.12 python tools/build_macos_release.py \
 
 # 不带扩展，构建纯原生 MLX 运行时
 uv run --no-project --python 3.12 python tools/build_macos_release.py \
-  --without-extension --name spark-mlx-0.1.0-native-macos-arm64
+  --without-extension --name spark-mlx-0.1.1-native-macos-arm64
 ```
 
 `--extension-python` 会读取指定环境中的扩展目录和分发元数据，制作普通 wheel，
@@ -79,7 +79,7 @@ uv run --no-project --python 3.12 python tools/build_macos_release.py \
 ```sh
 UV_OFFLINE=1 uv run --no-project --python 3.12 python tools/build_macos_release.py \
   --extension-python .venv/bin/python \
-  --min-macos 26.2 --name spark-mlx-0.1.0-macos26-arm64
+  --min-macos 26.2 --name spark-mlx-0.1.1-macos26-arm64
 ```
 
 `--min-macos` 会影响依赖 wheel 的选择、二进制审计和包内最低版本提示。
@@ -100,9 +100,9 @@ uv run --no-project --python 3.12 python tools/build_macos_release.py --help
 将压缩包和对应 `.sha256` 放在同一个目录：
 
 ```sh
-shasum -a 256 -c spark-mlx-0.1.0-macos-arm64.tar.gz.sha256
-tar -xzf spark-mlx-0.1.0-macos-arm64.tar.gz
-cd spark-mlx-0.1.0-macos-arm64
+shasum -a 256 -c spark-mlx-0.1.1-macos-arm64.tar.gz.sha256
+tar -xzf spark-mlx-0.1.1-macos-arm64.tar.gz
+cd spark-mlx-0.1.1-macos-arm64
 ./bin/spark-mlx-doctor --gpu
 ```
 

@@ -5,6 +5,9 @@ Spark-MLX-LLM macOS ARM64 release / 发布包使用说明
 内存要求：大于 8 GB 统一内存，推荐运行 4B 量化模型。
 模型权重单独准备。移动时保留整个目录，不要只复制 bin。
 
+0.1.1 已知限制：DSpark HTTP 流式文本可能为空；接口暂不接受分段文本列表和工具定义。
+完整消息与工具定义可通过包内 Python 接口应用 tokenizer 聊天模板后生成。
+
 检查运行环境：
 
   ./bin/spark-mlx-doctor

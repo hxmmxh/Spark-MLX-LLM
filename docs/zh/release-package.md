@@ -6,9 +6,13 @@
 无需安装 Python、uv、Homebrew 或 Xcode，也无需克隆源码、激活虚拟环境。
 模型权重单独准备，不包含在运行时发布包中。
 
+0.1.1 已知限制：DSpark HTTP 流式响应可能只有 token 用量而没有非空文本，
+且该接口暂不接受分段文本列表和工具定义。完整消息与工具定义可通过包内
+Python 接口应用 tokenizer 的聊天模板后生成。
+
 ## 1. 确认系统要求
 
-本文以当前生成的 `spark-mlx-0.1.0-macos26-arm64.tar.gz` 为例：
+本文以当前生成的 `spark-mlx-0.1.1-macos26-arm64.tar.gz` 为例：
 
 | 项目 | 要求 |
 | --- | --- |
@@ -23,9 +27,9 @@
 将发布包和同名 `.sha256` 文件下载到同一目录，在该目录打开终端执行：
 
 ```sh
-shasum -a 256 -c spark-mlx-0.1.0-macos26-arm64.tar.gz.sha256
-tar -xzf spark-mlx-0.1.0-macos26-arm64.tar.gz
-cd spark-mlx-0.1.0-macos26-arm64
+shasum -a 256 -c spark-mlx-0.1.1-macos26-arm64.tar.gz.sha256
+tar -xzf spark-mlx-0.1.1-macos26-arm64.tar.gz
+cd spark-mlx-0.1.1-macos26-arm64
 ```
 
 校验应显示 `OK`。若下载的是其他版本，请相应替换文件名。
