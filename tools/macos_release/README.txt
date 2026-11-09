@@ -14,6 +14,8 @@ Spark-MLX-LLM macOS ARM64 release / 发布包使用说明
 
 准备原始 compressed-tensors INT4 目录或受支持的 Spark 主模型 GGUF，
 以及配套的草稿模型。以下命令使用 DSpark，浮点草稿默认按 INT8 加载。
+生成、聊天和 HTTP 服务默认每轮最多生成 3 个草稿 token；预测槽位不足时使用实际可用槽位数。
+生成与服务命令可用 --max-draft-tokens N 覆盖，设为 0 禁用草稿生成。
 
 一次生成：
 

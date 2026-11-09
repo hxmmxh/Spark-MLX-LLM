@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any
 
 
+DEFAULT_MAX_DRAFT_TOKENS = 3
+
+
 def _check_integer(name: str, value: Any, minimum: int = 1) -> None:
     if type(value) is not int or value < minimum:
         raise ValueError(f"{name} must be an integer >= {minimum}, got {value!r}")

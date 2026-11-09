@@ -7,6 +7,7 @@ import mlx.core as mx
 
 from .acceptance import AcceptanceResult, greedy_accept, sampled_accept
 from .cache import cache_arrays
+from .config import DEFAULT_MAX_DRAFT_TOKENS
 from .draft_policy import verification_length
 from .metrics import DraftLengthStats, GenerationResult
 from .sampling import SamplingOptions, sample_draft, sample_logits
@@ -84,6 +85,9 @@ def stream_generate(
     Token IDs include EOS when emitted; result.text excludes the trailing EOS.
     Every call creates its own target and draft caches.
     max_new_tokens=None removes the output length limit and stops only at EOS.
+    max_draft_tokens=None caps each round at 3 candidates, or fewer when the
+    checkpoint has fewer prediction slots. Explicit values override this cap;
+    zero disables drafting without changing the checkpoint's trained block size.
     Greedy verification defaults to batched; select sequential for correctness tests.
     sampling controls the target; draft_sampling controls draft proposals and defaults
     to a copy of the target policy. Both use SamplingOptions.
@@ -109,7 +113,11 @@ def stream_generate(
     if not 0 <= confidence_threshold <= 1:
         raise ValueError("confidence_threshold must be in [0, 1]")
     available = pair.drafter.config.max_draft_tokens
-    cap = available if max_draft_tokens is None else max_draft_tokens
+    cap = (
+        min(DEFAULT_MAX_DRAFT_TOKENS, available)
+        if max_draft_tokens is None
+        else max_draft_tokens
+    )
     if type(cap) is not int or not 0 <= cap <= available:
         raise ValueError("max_draft_tokens must fit the trained draft prediction slots")
     options = sampling or SamplingOptions()

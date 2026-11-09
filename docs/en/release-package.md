@@ -70,7 +70,7 @@ Generate one response:
   --model "/path/to/Spark-X2.6-4B-INT4" \
   --draft-model "/path/to/Spark-X2.6-4B-DSpark.gguf" \
   --prompt 'Hello. Introduce yourself in one sentence.' \
-  --max-new-tokens 128 --stats
+  --max-draft-tokens 3 --max-new-tokens 128 --stats
 ```
 
 Start an interactive chat:
@@ -86,6 +86,10 @@ Enter `q` to exit, `r` to reset the conversation, or `h` for help. Low-effort
 thinking is enabled by default, and floating-point drafts use INT8 by default.
 The output token limit includes both reasoning and the final answer.
 
+DSpark generation, chat, and HTTP serving default to at most 3 draft tokens per
+round, capped by the checkpoint's available prediction slots. Generation and
+server commands accept `--max-draft-tokens N` to override this limit; `0` disables drafting.
+
 ## 6. Start the HTTP chat service
 
 ```sh
@@ -93,6 +97,7 @@ The output token limit includes both reasoning and the final answer.
   --model "/path/to/Spark-X2.6-4B-INT4" \
   --draft-model "/path/to/Spark-X2.6-4B-DSpark.gguf" \
   --served-model-name spark-x2.6-4b \
+  --max-draft-tokens 3 \
   --host 127.0.0.1 --port 8080 \
   --max-tokens 512
 ```

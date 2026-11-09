@@ -120,7 +120,7 @@ replace both the target and draft paths.
     --prompt 'Explain speculative decoding in one paragraph.' \
     --temperature 1 --top-p 0.95 --top-k 0 \
     --draft-temperature 1 --draft-top-p 1 --draft-top-k 0 \
-    --max-new-tokens 512 --stats
+    --max-draft-tokens 3 --max-new-tokens 512 --stats
 ```
 
 Specify the target with `--model` and its matching draft with `--draft-model`.
@@ -139,6 +139,9 @@ temperature `1` with `top_p=0.95`, draft temperature `1` with `top_p=1`, and no
 
 This loads the target and its matching draft for multi-turn conversations with DSpark.
 
+DSpark defaults to at most 3 draft tokens per round across generation, chat,
+and HTTP serving. Checkpoints with fewer prediction slots use their available slots.
+
 `--max-tokens` limits the combined thinking and final-answer length; increase it
 as needed. See [thinking modes](docs/en/examples.md#thinking-modes) for other settings.
 
@@ -156,6 +159,7 @@ result = generate(
     pair,
     "Explain speculative decoding.",
     max_new_tokens=512,
+    max_draft_tokens=3,
     sampling=SamplingOptions(temperature=1.0, top_p=0.95),
     draft_sampling=SamplingOptions(temperature=0.0),
 )
@@ -180,7 +184,7 @@ Common DSpark `generate` options are listed below. Run
 | `--mode baseline` | Run only the target for comparison with DSpark |
 | `--temperature` / `--top-p` / `--top-k` | Target sampling; temperature defaults to `0` for greedy sampling |
 | `--draft-temperature` / `--draft-top-p` / `--draft-top-k` | Draft sampling; each omitted field inherits its target counterpart |
-| `--max-draft-tokens N` | Cap candidates per round; `0` disables drafting |
+| `--max-draft-tokens N` | Cap candidates per round; defaults to at most `3`; `0` disables drafting |
 | `--max-new-tokens N` | Limit output length; the standard generation entry point uses `--max-tokens` |
 | `--stats` / `--json` | Write statistics to stderr / return text and metrics as JSON |
 | `--raw-prompt` | Skip the chat template applied by default |

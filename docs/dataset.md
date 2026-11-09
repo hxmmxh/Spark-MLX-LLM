@@ -46,6 +46,7 @@ cd /Users/xmhuang6/workspace/spark_mlx_llm_my
 默认 `--greedy-verification batched` 使用整块验证；仅在正确性测试时显式指定
 `--greedy-verification sequential`。两者的数值差异和用途见
 [DSpark 文档](../spark_mlx_llm/dspark/README.md)。
+默认每轮最多生成 3 个草稿 token，受检查点可用预测槽位数限制。
 可用 `--max-draft-tokens N`、`--confidence-threshold 0.3` 控制草稿验证。
 
 ## 输出及统计口径

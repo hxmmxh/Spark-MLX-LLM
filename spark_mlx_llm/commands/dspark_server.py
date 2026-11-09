@@ -9,6 +9,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from itertools import chain
 
+from ..dspark.config import DEFAULT_MAX_DRAFT_TOKENS
 from ..model_source import add_model_cache_arguments, model_cache_enabled
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,14 @@ def build_parser(*, prog=None):
     parser.add_argument("--draft-temperature", type=float, default=1.0)
     parser.add_argument("--draft-top-p", type=float, default=1.0)
     parser.add_argument("--draft-top-k", type=int, default=0)
-    parser.add_argument("--max-draft-tokens", type=int)
+    parser.add_argument(
+        "--max-draft-tokens",
+        type=int,
+        help=(
+            "Draft candidates per round "
+            f"(default: up to {DEFAULT_MAX_DRAFT_TOKENS}; 0 disables drafting)"
+        ),
+    )
     parser.add_argument("--confidence-threshold", type=float, default=0.0)
     parser.add_argument("--prefill-chunk-size", type=int, default=512)
     parser.add_argument(

@@ -13,7 +13,7 @@ from pathlib import Path
 from spark_mlx_llm.model_source import add_model_cache_arguments, model_cache_enabled
 
 from .checkpoint import inspect_checkpoint, validate_draft_shapes
-from .config import DSparkConfig
+from .config import DEFAULT_MAX_DRAFT_TOKENS, DSparkConfig
 from .metrics import GenerationResult
 from .tokenization import eos_token_ids
 
@@ -60,7 +60,14 @@ def _build_parser():
         runtime.add_argument("--prompt", "-p", default="你好")
         runtime.add_argument("--max-new-tokens", type=int, default=512)
         runtime.add_argument("--mode", choices=("baseline", "dspark"), default="dspark")
-        runtime.add_argument("--max-draft-tokens", type=int)
+        runtime.add_argument(
+            "--max-draft-tokens",
+            type=int,
+            help=(
+                "Draft candidates per round "
+                f"(default: up to {DEFAULT_MAX_DRAFT_TOKENS}; 0 disables drafting)"
+            ),
+        )
         runtime.add_argument("--confidence-threshold", type=float, default=0.0)
         runtime.add_argument(
             "--greedy-verification",

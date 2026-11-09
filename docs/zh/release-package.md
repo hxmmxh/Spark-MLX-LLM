@@ -69,6 +69,7 @@ cd spark-mlx-0.1.0-macos26-arm64
 | 主模型 `top_k` | `0`，不限制候选 token 数 |
 | DSpark 草稿采样 | 温度、`top_p`、`top_k` 逐项继承主模型；默认同样使用贪心采样 |
 | DSpark 草稿精度 | 浮点草稿加载时量化为 INT8；已有 INT8/INT4 草稿按保存格式加载 |
+| DSpark 草稿长度 | 每轮最多 `3` 个 token；预测槽位不足 3 个时使用实际可用槽位数 |
 | 输出长度上限 | `512` tokens，包含思考与最终回答 |
 
 温度大于 `0` 时，按 `top_p`、`top_k` 筛选后的概率分布随机采样。
@@ -85,7 +86,7 @@ cd spark-mlx-0.1.0-macos26-arm64
     --prompt '请用一段话解释推测解码。' \
     --temperature 1 --top-p 0.95 --top-k 0 \
     --draft-temperature 1 --draft-top-p 1 --draft-top-k 0 \
-    --max-new-tokens 512 --stats
+    --max-draft-tokens 3 --max-new-tokens 512 --stats
 ```
 
 主模型通过 `--model` 指定，配套草稿通过 `--draft-model` 指定。
@@ -119,6 +120,7 @@ result = generate(
     pair,
     "请解释推测解码。",
     max_new_tokens=512,
+    max_draft_tokens=3,
     sampling=SamplingOptions(temperature=1.0, top_p=0.95),
     draft_sampling=SamplingOptions(temperature=0.0),
 )
@@ -143,7 +145,7 @@ DSpark `generate` 的常用参数如下，完整参数可运行
 | `--mode baseline` | 仅运行主模型，便于与 DSpark 对比 |
 | `--temperature` / `--top-p` / `--top-k` | 主模型采样；默认温度为 `0`，使用贪心采样 |
 | `--draft-temperature` / `--draft-top-p` / `--draft-top-k` | 草稿采样；未指定的字段逐项继承主模型设置 |
-| `--max-draft-tokens N` | 限制每轮候选数；`0` 禁用草稿生成 |
+| `--max-draft-tokens N` | 限制每轮候选数，默认最多 `3`；`0` 禁用草稿生成 |
 | `--max-new-tokens N` | 限制生成长度；普通生成入口对应参数为 `--max-tokens` |
 | `--stats` / `--json` | 将统计写入 stderr / 以 JSON 返回文本和指标 |
 | `--raw-prompt` | 跳过默认应用的聊天模板 |
@@ -188,6 +190,7 @@ Python 的 `load_pair()` 使用相同默认值，通过 `pair.draft_quantization
     --host 127.0.0.1 --port 8080 \
     --thinking --reasoning-effort low \
     --draft-quantization int8 \
+    --max-draft-tokens 3 \
     --temperature 1 --top-p 0.95 --top-k 0 \
     --draft-temperature 1 --draft-top-p 1 --draft-top-k 0 \
     --max-context-length 262144 \

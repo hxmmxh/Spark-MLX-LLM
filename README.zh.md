@@ -104,7 +104,7 @@ DSpark 草稿只需下载对应的 BF16 GGUF 文件。
     --prompt '请用一段话解释推测解码。' \
     --temperature 1 --top-p 0.95 --top-k 0 \
     --draft-temperature 1 --draft-top-p 1 --draft-top-k 0 \
-    --max-new-tokens 512 --stats
+    --max-draft-tokens 3 --max-new-tokens 512 --stats
 ```
 
 主模型通过 `--model` 指定，配套草稿通过 `--draft-model` 指定。
@@ -120,6 +120,9 @@ DSpark 草稿只需下载对应的 BF16 GGUF 文件。
 ```
 
 该命令同时加载主模型与配套草稿，使用 DSpark 进行多轮对话。
+
+DSpark 生成、聊天和 HTTP 服务默认每轮最多生成 3 个草稿 token；
+检查点预测槽位不足 3 个时使用其实际可用槽位数。
 
 `--max-tokens` 包含思考与最终回答的总长度，可按需调大。
 其他思考模式见[思考模式说明](docs/zh/examples.md#思考模式)。
@@ -138,6 +141,7 @@ result = generate(
     pair,
     "请解释推测解码。",
     max_new_tokens=512,
+    max_draft_tokens=3,
     sampling=SamplingOptions(temperature=1.0, top_p=0.95),
     draft_sampling=SamplingOptions(temperature=0.0),
 )
@@ -162,7 +166,7 @@ DSpark `generate` 的常用参数如下，完整参数可运行
 | `--mode baseline` | 仅运行主模型，便于与 DSpark 对比 |
 | `--temperature` / `--top-p` / `--top-k` | 主模型采样；默认温度为 `0`，使用贪心采样 |
 | `--draft-temperature` / `--draft-top-p` / `--draft-top-k` | 草稿采样；未指定的字段逐项继承主模型设置 |
-| `--max-draft-tokens N` | 限制每轮候选数；`0` 禁用草稿生成 |
+| `--max-draft-tokens N` | 限制每轮候选数，默认最多 `3`；`0` 禁用草稿生成 |
 | `--max-new-tokens N` | 限制生成长度；普通生成入口对应参数为 `--max-tokens` |
 | `--stats` / `--json` | 将统计写入 stderr / 以 JSON 返回文本和指标 |
 | `--raw-prompt` | 跳过默认应用的聊天模板 |
