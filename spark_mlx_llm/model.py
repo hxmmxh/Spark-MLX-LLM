@@ -52,7 +52,9 @@ class ModelArgs(BaseModelArgs, linear.LinearConfig, sdpa.SDPAConfig):
 
     @classmethod
     def from_dict(cls, params):
-        # Reject the renamed key before BaseModelArgs drops unknown metadata.
+        # Legacy checkpoints can contain a runtime preference. It must not
+        # override the automatic policy, including in upstream MLX-LM loaders.
+        params = {**params, "w8_qmv_backend": linear.automatic_w8_backend()}
         linear.LinearConfig.validate_values(params)
         return super().from_dict(params)
 
@@ -392,5 +394,5 @@ class Model(nn.Module):
         return {
             name: value
             for name, value in weights.items()
-            if "rotary_emb.inv_freq" not in name
+            if "rotary_emb.inv_freq" not in name and not name.startswith("draft_model.")
         }

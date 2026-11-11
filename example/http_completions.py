@@ -12,7 +12,10 @@ PAYLOAD = {
     "model": "spark-x2.6-4b",
     "prompt": "春天来了，",
     "max_tokens": 128,
-    "temperature": 0.0,
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "seed": 0,
+    "apply_chat_template": False,
     "stream": False,
 }
 

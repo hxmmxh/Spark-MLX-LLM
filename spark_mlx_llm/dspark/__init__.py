@@ -1,4 +1,4 @@
-"""Public DSpark metadata, sampling, acceptance, and generation interfaces."""
+"""Internal speculative-decoding components; inference uses the package API."""
 
 from importlib import import_module
 
@@ -30,26 +30,20 @@ __all__ = [
     "SamplingOptions",
     "TensorInfo",
     "TokenEvent",
-    "generate",
     "greedy_accept",
     "inspect_checkpoint",
-    "load_pair",
     "prefix_survival_probabilities",
     "read_safetensors_header",
     "sample_draft",
     "sampled_accept",
     "save_draft",
     "spark_layer_specs",
-    "stream_generate",
     "validate_draft_shapes",
     "verification_length",
 ]
 
 _RUNTIME_EXPORTS = {
     "DSparkDrafter": "drafter",
-    "load_pair": "loader",
-    "generate": "generation",
-    "stream_generate": "generation",
     "TokenEvent": "generation",
     "SamplingOptions": "sampling",
     "DraftPrediction": "sampling",

@@ -34,7 +34,8 @@ class PhaseTimings:
 
     @classmethod
     def from_result(cls, result):
-        # Sequential verification interleaves forward/accept/commit operations.
+        # Sequential verification interleaves phases, while the ordinary
+        # baseline pipelines them. Neither provides an additive wall-time split.
         if result.target_forward_seconds is None:
             return None
         parts = {
@@ -132,11 +133,17 @@ class GenerationResult:
     target_forward_seconds: float | None = None
     acceptance_seconds: float | None = None
     target_commit_seconds: float = 0.0
+    effective_config: dict = field(default_factory=dict)
+    prompt_sha256: str | None = None
+
+    @property
+    def decode_tokens(self):
+        return max(0, len(self.token_ids) - 1)
 
     @property
     def tokens_per_second(self):
         return (
-            len(self.token_ids) / self.generation_seconds
+            self.decode_tokens / self.generation_seconds
             if self.generation_seconds
             else 0.0
         )
@@ -161,6 +168,7 @@ class GenerationResult:
     def to_dict(self):
         return {
             **asdict(self),
+            "decode_tokens": self.decode_tokens,
             "tokens_per_second": self.tokens_per_second,
             "draft_acceptance_rate": self.draft_acceptance_rate,
             "mean_acceptance_length": self.mean_acceptance_length,
@@ -170,3 +178,11 @@ class GenerationResult:
                 for length, stats in sorted(self.draft_length_stats.items())
             },
         }
+
+    def metrics(self):
+        """The same compact measurement record for API, CLI, HTTP and benchmarks."""
+        result = self.to_dict()
+        result.pop("token_ids")
+        result.pop("text")
+        result["output_tokens"] = len(self.token_ids)
+        return result

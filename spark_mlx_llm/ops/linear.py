@@ -24,6 +24,7 @@ __all__ = [
     "W8A16PerChannelLinear",
     "W8MultirowProjection",
     "dispatch_linear",
+    "automatic_w8_backend",
 ]
 
 _extension = get_extension()
@@ -39,6 +40,16 @@ _SPLITK_SHAPES = frozenset(((6144, 2560), (2560, 10240)))
 _MULTIROW_SHAPES = _SPLITK_SHAPES | {(10240, 2560)}
 
 
+def automatic_w8_backend():
+    """Use the validated target W8 arithmetic on current Apple GPUs and CPU.
+
+    Draft projections independently select single-row W8A16 and NAX/matrix
+    multirow kernels. Target alternatives remain available to operator
+    diagnostics, but are not checkpoint or public loading preferences.
+    """
+    return "native"
+
+
 @dataclass(kw_only=True)
 class LinearConfig(OperatorConfig):
     """Select implementations for existing W8/W4 layers, never weight bit widths.
@@ -50,7 +61,7 @@ class LinearConfig(OperatorConfig):
     """
 
     w8_qmv_backend: str = field(
-        default="w8a16",
+        default="native",
         metadata={"choices": ("auto", "native", "w8a16", "w8a8", "multirow")},
     )
     w4_qmv_backend: str = field(
@@ -62,9 +73,19 @@ class LinearConfig(OperatorConfig):
     def validate_values(cls, values):
         if "qmv_backend" in values:
             raise ValueError(
-                "qmv_backend was renamed to w8_qmv_backend; update the configuration"
+                "qmv_backend was removed; W8 routing is automatic"
             )
         super().validate_values(values)
+
+    @classmethod
+    def validate_overrides(cls, values):
+        """Reject deleted user selectors while retaining legacy checkpoint reads."""
+        removed = {"w8_qmv_backend", "qmv_backend"} & values.keys()
+        if removed:
+            raise ValueError(
+                f"{', '.join(sorted(removed))} was removed; W8 routing is automatic"
+            )
+        cls.validate_values(values)
 
 
 def dispatch_linear(x, projection, *, config: LinearConfig | None = None):
@@ -701,7 +722,11 @@ class QuantizedProjections:
         paths = set()
         for name, parent, attribute in QuantizedProjections._projections(model):
             projection = getattr(parent, attribute)
-            if type(projection) in (W8A16PerChannelLinear, W8MultirowProjection):
+            if type(projection) is nn.QuantizedLinear:
+                paths.add(name + ".scales")
+                if projection.biases is not None:
+                    paths.add(name + ".biases")
+            elif type(projection) in (W8A16PerChannelLinear, W8MultirowProjection):
                 paths.add(name + ".scales")
             elif type(projection) is W8A8Projection:
                 paths.add(name + ".projection.scales")

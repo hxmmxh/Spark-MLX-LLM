@@ -6,11 +6,10 @@ import statistics
 from contextlib import closing
 
 import mlx.core as mx
-from mlx_lm import load, stream_generate
-from mlx_lm.sample_utils import make_sampler
+from spark_mlx_llm import load, generate
 
 from spark_mlx_llm.generation import GenerationConfig
-from spark_mlx_llm.generation import make_prompt_cache as make_benchmark_cache
+from spark_mlx_llm.kv_cache import make_prompt_cache as make_benchmark_cache
 from spark_mlx_llm.ops.linear import LinearConfig
 from spark_mlx_llm.ops.sdpa import SDPAConfig
 from spark_mlx_llm.registration import register_model
@@ -75,9 +74,8 @@ def load_benchmark(args):
         if name in (LinearConfig.__dataclass_fields__ | SDPAConfig.__dataclass_fields__)
         and value is not None
     }
-    model, tokenizer, config = load(
-        args.model, model_config=overrides, return_config=True
-    )
+    model, tokenizer = load(args.model, model_config=overrides, use_draft=False)
+    config = model._spark_runtime.config
     text_config = config.get("text_config", config)
     context_limit = text_config.get("max_position_embeddings")
     total = args.prompt_tokens + args.decode_tokens
@@ -89,7 +87,6 @@ def load_benchmark(args):
         make_benchmark_cache(model, options["kv_quantization_scope"])
     mx.eval(model.parameters())
     # Match mlx_lm.benchmark: keep every trial at the requested output length.
-    tokenizer.eos_token_ids = set()
     rng = random.Random(0)
     prompt = mx.array(
         [rng.randrange(text_config["vocab_size"]) for _ in range(args.prompt_tokens)],
@@ -111,46 +108,22 @@ def run_generation(
     quantized_kv_start=0,
     kv_quantization_scope=GenerationConfig.kv_quantization_scope,
 ):
-    """Use the same generation and timing implementation as mlx_lm.generate."""
-    generation_options = {}
-    if kv_bits is not None:
-        generation_options = {
-            "prompt_cache": make_benchmark_cache(model, kv_quantization_scope),
-            "kv_bits": kv_bits,
-            "kv_group_size": kv_group_size,
-            "quantized_kv_start": quantized_kv_start,
-        }
+    """Explicit fixed-length diagnostic using the shared public generation API."""
+    config = GenerationConfig(
+        max_tokens=decode_tokens, temperature=0, seed=0,
+        apply_chat_template=False, stop_at_eos=False, clear_cache=True,
+        prefill_step_size=prefill_step_size, kv_bits=kv_bits,
+        kv_group_size=kv_group_size, quantized_kv_start=quantized_kv_start,
+        kv_quantization_scope=kv_quantization_scope,
+    )
     mx.synchronize()
-    mx.clear_cache()
-    response = None
     try:
-        # Without KV quantization MLX-LM creates the fresh cache, as before.
-        with closing(
-            stream_generate(
-                model,
-                tokenizer,
-                prompt,
-                max_tokens=decode_tokens,
-                prefill_step_size=prefill_step_size,
-                sampler=make_sampler(temp=0.0),
-                **generation_options,
-            )
-        ) as responses:
-            for response in responses:
-                pass
+        result = generate(model, tokenizer, prompt, config=config)
     finally:
         mx.synchronize()
-    if response is None:
-        raise RuntimeError("MLX-LM returned no generation statistics")
-    if (
-        response.generation_tokens != decode_tokens
-        or response.finish_reason != "length"
-    ):
-        raise RuntimeError(
-            f"MLX-LM generated {response.generation_tokens}/{decode_tokens} tokens "
-            f"(finish_reason={response.finish_reason!r}); EOS stopping must be disabled"
-        )
-    return response
+    if len(result.token_ids) != decode_tokens or result.finish_reason != "length":
+        raise RuntimeError(f"Generated {len(result.token_ids)}/{decode_tokens} tokens (finish_reason={result.finish_reason!r})")
+    return result
 
 
 def main():
@@ -168,7 +141,7 @@ def main():
         f"Prefill step: {args.prefill_step_size}",
         flush=True,
     )
-    print("Generator: mlx_lm.stream_generate | Timing: MLX-LM | EOS: ignored")
+    print("Generator: spark_mlx_llm.generate | Shared decode timing | EOS: explicitly disabled")
     kv_options = kv_generation_options(args)
     if args.kv_bits is None:
         print("KV cache: model dtype (quantization disabled)", flush=True)
@@ -201,8 +174,8 @@ def main():
             args.prefill_step_size,
             **kv_options,
         )
-        prefill = response.prompt_tps
-        decode = response.generation_tps
+        prefill = response.prompt_tokens / response.prefill_seconds if response.prefill_seconds else 0
+        decode = response.tokens_per_second
         prefill_speeds.append(prefill)
         decode_speeds.append(decode)
         print(f"{run:>6} {prefill:>16.2f} {decode:>16.2f}", flush=True)

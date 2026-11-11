@@ -110,8 +110,19 @@ def process_tree_pids(processes: list[dict[str, Any]], roots: set[int]) -> set[i
         excluded.update(children)
 
 
-def _module_kind(module: str) -> str | None:
+def _spark_command_kind(arguments: Iterator[str]) -> str | None:
+    task = next(arguments, None)
+    if task in {"generate", "chat", "server", "benchmark"} or (
+        task == "doctor" and "--gpu" in arguments
+    ):
+        return "MLX inference/training/benchmark"
+    return None
+
+
+def _module_kind(module: str, arguments: Iterator[str]) -> str | None:
     module = module.lower()
+    if module in {"spark_mlx_llm", "spark_mlx_llm.__main__"}:
+        return _spark_command_kind(arguments)
     if module in {"llamacpp_spark.benchmark", "llamacpp_spark._benchmark_worker"}:
         return "llama inference/benchmark"
     if module in {
@@ -144,8 +155,14 @@ def _entry_kind(
         return None
     if name in {"spark-mlx-generate", "spark-mlx-chat", "spark-mlx-server"}:
         return "MLX inference/training/benchmark"
+    if name == "spark-mlx":
+        return _spark_command_kind(arguments)
+    if name == "launch.py" and Path(entry).parent.name == "libexec":
+        if next(arguments, None) == "spark-mlx":
+            return _spark_command_kind(arguments)
+        return None
     # MLX also installs console entry points such as mlx_lm.generate.
-    module_kind = _module_kind(name)
+    module_kind = _module_kind(name, arguments)
     if module_kind:
         return module_kind
     tasks = {
@@ -268,9 +285,9 @@ def process_kind(command: str) -> str | None:
                     if script in {"-", "-c"} or script.startswith("-c"):
                         return None
                     if script == "-m":
-                        return _module_kind(next(arguments))
+                        return _module_kind(next(arguments), arguments)
                     if script.startswith("-m"):
-                        return _module_kind(script[2:])
+                        return _module_kind(script[2:], arguments)
                     if script in {"-W", "-X", "--check-hash-based-pycs"}:
                         next(arguments)
                     elif not (

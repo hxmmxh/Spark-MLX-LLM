@@ -23,7 +23,7 @@ interactive chat, Python APIs, and HTTP serving.
 - **Load official models directly:** use Spark-X2.6-4B-INT4 and Spark-X2.6-1.7B-INT4
   without prior conversion.
 - **Mixed-precision support:** preserve the official models' INT4, INT8, and BF16
-  weight scheme, with configurable W8 execution backends.
+  weight scheme.
 - **DSpark speculative decoding:** load the target and its matching draft
   separately or use a merged checkpoint, with independent sampling settings for each.
 - **Apple Silicon optimizations:** dedicated QKV/RoPE, linear, and INT8 KV
@@ -89,171 +89,65 @@ generation and serving examples follow below.
 
 ### 2. Generation and chat
 
-Load **compressed-tensors INT4 Safetensors targets** and **BF16 GGUF DSpark
-drafts** directly, without converting them to MLX format first.
-
-Command-line generation and chat use the following defaults unless explicitly overridden:
-
-| Setting | Default and behavior |
-| --- | --- |
-| Thinking mode | Enabled, with `low` reasoning effort |
-| Target `temperature` | `0`: greedy sampling selects the highest-probability token at each step |
-| Target `top_p` | `1`: no cumulative-probability truncation |
-| Target `top_k` | `0`: no limit on the number of candidate tokens |
-| DSpark draft sampling | Temperature, `top_p`, and `top_k` each inherit the target setting; greedy by default |
-| DSpark draft precision | Floating-point drafts are quantized to INT8 at load time; saved INT8/INT4 drafts retain their format |
-| Output limit | `512` tokens, including thinking and the final answer |
-
-When temperature is greater than `0`, tokens are sampled from the probability
-distribution after `top_p` and `top_k` filtering. Explicit options in the examples
-override these defaults.
-
-The examples use 4B models. Replace `/path/to/...` with local paths; for 1.7B,
-replace both the target and draft paths.
-
-**DSpark generation (recommended):**
+Ordinary and DSpark decoding share one loader, generation API and command.
+Python/generation CLI use built-in `GenerationConfig` defaults; no JSON file is required.
+See the [inference guide](docs/inference.md)
+for the complete contract and reproducible measurement settings.
 
 ```sh
-.venv/bin/python -m spark_mlx_llm.dspark generate \
-    --model /path/to/Spark-X2.6-4B-INT4 \
-    --draft-model /path/to/Spark-X2.6-4B-DSpark.gguf \
-    --prompt 'Explain speculative decoding in one paragraph.' \
-    --temperature 1 --top-p 0.95 --top-k 0 \
-    --draft-temperature 1 --draft-top-p 1 --draft-top-k 0 \
-    --max-draft-tokens 3 --max-new-tokens 512 --stats
+.venv/bin/spark-mlx generate --model /path/to/TARGET --draft-model /path/to/DRAFT --prompt 'Explain speculative decoding.' --json
+.venv/bin/spark-mlx chat --model /path/to/TARGET --draft-model /path/to/DRAFT --stream
 ```
 
-Specify the target with `--model` and its matching draft with `--draft-model`.
-The target also accepts converted MLX directories, and the draft also accepts
-exported MLX Safetensors directories. This example uses random sampling: target
-temperature `1` with `top_p=0.95`, draft temperature `1` with `top_p=1`, and no
-`top_k` limit for either.
-
-**DSpark interactive chat:**
-
-```sh
-.venv/bin/spark-mlx-chat \
-    --model /path/to/Spark-X2.6-4B-INT4 \
-    --draft-model /path/to/Spark-X2.6-4B-DSpark.gguf
-```
-
-This loads the target and its matching draft for multi-turn conversations with DSpark.
-
-DSpark defaults to at most 3 draft tokens per round across generation, chat,
-and HTTP serving. Checkpoints with fewer prediction slots use their available slots.
-
-`--max-tokens` limits the combined thinking and final-answer length; increase it
-as needed. See [thinking modes](docs/en/examples.md#thinking-modes) for other settings.
-
-<details>
-<summary>Python generation example</summary>
+Omit `--draft-model` for a target-only checkpoint. Merged checkpoints detect the draft
+automatically; `--no-use-draft` loads only their target.
+Defaults are target temperature 1 / top-p 0.95, draft temperature 1 / top-p 1,
+seed 0, output limit 512, at most 3 draft tokens, thinking low, and both async flags enabled.
 
 ```python
-from spark_mlx_llm.dspark import SamplingOptions, generate, load_pair
+from spark_mlx_llm import GenerationConfig, load, generate
 
-pair = load_pair(
-    "/path/to/Spark-X2.6-4B-INT4",
-    draft_path="/path/to/Spark-X2.6-4B-DSpark.gguf",
-)
-result = generate(
-    pair,
-    "Explain speculative decoding.",
-    max_new_tokens=512,
-    max_draft_tokens=3,
-    sampling=SamplingOptions(temperature=1.0, top_p=0.95),
-    draft_sampling=SamplingOptions(temperature=0.0),
-)
+model, tokenizer = load("/path/to/TARGET", draft_model="/path/to/DRAFT")
+config = GenerationConfig()
+result = generate(model, tokenizer, "Explain speculative decoding.", config=config)
 print(result.text)
-print(result.draft_acceptance_rate, result.mean_acceptance_length)
+for chunk in generate(model, tokenizer, "Explain speculative decoding.", config=config, stream=True):
+    print(chunk.text, end="", flush=True)
 ```
-
-See the [interface guide](docs/en/examples.md) for generation and streaming APIs.
-
-</details>
-
-<details>
-<summary>More options: sampling parameters and draft precision</summary>
-
-#### Sampling and generation parameters
-
-Common DSpark `generate` options are listed below. Run
-`.venv/bin/python -m spark_mlx_llm.dspark generate --help` for all options.
-
-| Option | Purpose |
-| --- | --- |
-| `--mode baseline` | Run only the target for comparison with DSpark |
-| `--temperature` / `--top-p` / `--top-k` | Target sampling; temperature defaults to `0` for greedy sampling |
-| `--draft-temperature` / `--draft-top-p` / `--draft-top-k` | Draft sampling; each omitted field inherits its target counterpart |
-| `--max-draft-tokens N` | Cap candidates per round; defaults to at most `3`; `0` disables drafting |
-| `--max-new-tokens N` | Limit output length; the standard generation entry point uses `--max-tokens` |
-| `--stats` / `--json` | Write statistics to stderr / return text and metrics as JSON |
-| `--raw-prompt` | Skip the chat template applied by default |
-
-#### Draft precision options
-
-Floating-point drafts are quantized to INT8 at load time by default; saved
-INT8/INT4 drafts are restored in their stored format. Use `--draft-quantization`
-to preserve floating-point precision or select INT4 explicitly.
-
-| `--draft-quantization` | Behavior |
-| --- | --- |
-| Omitted (default) | Quantize floating-point drafts to INT8; restore this project's quantized MLX drafts in their saved format |
-| `checkpoint` | Preserve the checkpoint precision; load floating-point or this project's quantized MLX drafts directly |
-| `bf16` | Preserve floating-point draft weights; existing quantized drafts require `checkpoint` or the matching quantization policy |
-| `int8` | Use symmetric per-output-channel INT8 with FP32 scales for the main linear projections |
-| `int4` | Use asymmetric INT4/G32 for QKV and FFN gate/up/down, and INT8 for the other main projections |
-
-| Draft module | `int8` | `int4` |
-| --- | --- | --- |
-| Attention QKV and FFN gate/up/down | Symmetric per-channel INT8, FP32 scales | Asymmetric INT4/G32, BF16 scales/offsets |
-| Feature fusion `fc`, attention `out_proj`, Markov output projection | Symmetric per-channel INT8, FP32 scales | Symmetric per-channel INT8, FP32 scales |
-| Independent draft `lm_head`, if present | Symmetric per-channel INT8 | Symmetric per-channel INT8 |
-| Token/Markov embeddings, attention gates, norms, confidence head | Floating point | Floating point |
-| Shared target output head | Selected readout policy | Selected readout policy |
-
-Quantization preserves the target and source files. Acceptance/rejection correction
-uses the quantized draft's actual proposal probabilities. When dedicated W8 kernels
-are unavailable, execution falls back to floating-point operations on quantized
-weights without retaining copies of the original BF16 linear modules.
-Python's `load_pair()` uses the same defaults; inspect `pair.draft_quantization`
-for the actual quantized modules. These rules also apply to floating-point drafts
-in merged directories.
-
-</details>
 
 ### 3. Start an HTTP service
 
-**DSpark service (recommended):** pass the target directory and its matching draft file directly.
+#### Start the server
+
+Recommended settings for the 4B target and its matching draft are listed explicitly below.
+Replace the two model paths with local paths, then keep this terminal running.
 
 ```sh
-.venv/bin/spark-mlx-server \
+.venv/bin/spark-mlx server \
     --model /path/to/Spark-X2.6-4B-INT4 \
     --draft-model /path/to/Spark-X2.6-4B-DSpark.gguf \
     --served-model-name spark-x2.6-4b \
     --host 127.0.0.1 --port 8080 \
-    --thinking --reasoning-effort low \
+    --enable-thinking --reasoning-effort low \
     --draft-quantization int8 \
-    --temperature 1 --top-p 0.95 --top-k 0 \
+    --temperature 1 --top-p 0.95 --top-k 0 --min-p 0 \
     --draft-temperature 1 --draft-top-p 1 --draft-top-k 0 \
+    --max-draft-tokens 3 \
+    --asynchronous-draft --async-context --compile-draft-chain \
+    --seed 0 --prefill-step-size 512 \
     --max-context-length 262144 \
     --max-tokens 262144
 ```
 
-The DSpark service currently handles one request at a time.
+For 1.7B, replace both model paths and use a matching service name.
+For ordinary decoding, omit the draft-related options.
+To disable thinking, replace `--enable-thinking` with `--no-enable-thinking`.
+`--max-context-length` limits input plus output tokens; `--max-tokens` limits output,
+including reasoning and the final answer. Requests inherit these sampling settings unless overridden.
 
-**Target-only service:**
+#### Test HTTP requests
 
-```sh
-.venv/bin/spark-mlx-server \
-    --model /path/to/Spark-X2.6-4B-INT4 \
-    --served-model-name spark-x2.6-4b \
-    --host 127.0.0.1 --port 8080 \
-    --thinking --reasoning-effort low \
-    --temperature 0 --top-p 1 --top-k 0 \
-    --max-tokens 262144
-```
-
-Start either service and keep its terminal running. Send a chat request from another terminal:
+Open another terminal and send a request. Its `model` must match `--served-model-name`:
 
 ```sh
 curl --fail-with-body http://127.0.0.1:8080/v1/chat/completions \
@@ -265,11 +159,14 @@ curl --fail-with-body http://127.0.0.1:8080/v1/chat/completions \
     }'
 ```
 
-The request's `model` must match `--served-model-name`, here `spark-x2.6-4b`.
-Requests inherit the service's output limit when `max_tokens` is omitted; they
-can also set it explicitly within the context limit. Set `stream` to `true` and
-add `-N` to curl to receive SSE responses incrementally. Stop the service with Ctrl-C.
-See the [interface guide](docs/en/examples.md) for HTTP text completion and all options.
+For SSE, add `-N` to curl and change `"stream"` to `true`.
+
+You can also run the provided test scripts from the repository root:
+
+```sh
+.venv/bin/python example/http_chat.py
+.venv/bin/python example/http_completions.py
+```
 
 ## Quantization and compatibility
 
@@ -291,13 +188,10 @@ W8A8 backend is available and enabled.
 | `model.embedding` | BF16, unquantized | — | — |
 | RMSNorm | BF16, unquantized | Unquantized | — |
 
-All generation entry points default to unquantized KV caches that retain model
-precision: **BF16 models use BF16 KV**. To enable INT8/G32 KV for full-attention
-layers, pass `--kv-bits 8` to `spark-mlx-generate` or `kv_bits=8` to this package's
-Python generation functions. Generate and the Python wrappers use 512-token prompt
-chunks by default; chat and server retain upstream MLX LM chunking behavior.
-These settings are separate from weight quantization; see
-[KV caching and prompt chunking](docs/en/examples.md#kv-caching-and-prompt-chunking).
+KV caches retain model precision by default. Python/generation CLI use 512-token
+prefill chunks; HTTP preserves the original 2048-token default unless overridden.
+For target-only decoding, `GenerationConfig(kv_bits=8)` or `--kv-bits 8`
+enables quantized KV; see the [unified guide](docs/inference.md).
 
 ## Documentation
 

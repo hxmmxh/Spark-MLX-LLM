@@ -2,54 +2,28 @@
 
 [Project overview](../README.md)
 
-### Select optimized W8 QMV operators
+### Automatic W8 routing
 
-The production extension includes the final per-channel W8A16 kernels, W8A8
-v9 small-projection dispatch, and the single-token W8A8 `lm_head` specialization.
-Select them when loading a converted MLX checkpoint:
+W8 execution is selected internally. The public `w8_qmv_backend` Python option,
+`--w8-qmv-backend` CLI option and conversion-time `--w8-backend` preference
+have been removed. Explicit loader `model_config` overrides using the deleted
+selector are rejected; legacy checkpoint preferences are read compatibly and ignored.
 
-```sh
-.venv/bin/spark-mlx-generate \
-    --model /path/to/converted-mlx-checkpoint \
-    --w8-qmv-backend w8a16 \
-    --prompt '你好' --max-tokens 128
-```
-
-Use `--w8-qmv-backend w8a8` for the W8A8 experiment. Both choices cover affine W8
-attention `out_proj` layers and an untied W8 `lm_head`. W4 projections are
-controlled separately by `w4_qmv_backend`; embeddings are unchanged.
-
-| `w8_qmv_backend` | Behavior |
-|---|---|
-| `auto` | Preserve checkpoint activation metadata and existing routing. |
-| `native` | Force native MLX affine W8A16, including checkpoints with W8A8 metadata. |
-| `w8a16` (default) | Optimized per-channel W8A16 for single-row FP16/BF16 GPU decode; native prefill/CPU fallback. |
-| `w8a8` | Optimized W8A8 for GPU prefill and decode, including per-token activation quantization; native CPU fallback. Requires the M5+ extension. |
+The target retains the validated native MLX affine route. INT8 draft projections
+use the single-row W8A16 kernel and select NAX on capable M5+ GPUs or the matrix
+multirow kernel on compatible older GPUs, including the tested M4. Unsupported
+descriptors or unavailable extensions retain their numerical fallbacks.
+This policy preserves weight bit widths and BF16 draft activations; it does not
+automatically introduce A8 activation quantization.
 
 ```python
 from spark_mlx_llm import load
-
-model, tokenizer = load(
-    "/path/to/converted-mlx-checkpoint",
-    w8_qmv_backend="w8a16",  # or "w8a8"
-)
+model, tokenizer = load("/path/to/converted-mlx-checkpoint")
 ```
 
-Both optimized W8 backends derive their parameters from the loaded MLX affine
-checkpoint. INT8 codes are unpacked exactly and existing channel scales are
-widened to FP32; original FP32 scale precision cannot be recovered from BF16
-metadata. Groupwise or asymmetric W8 metadata is rejected. An explicitly
-requested backend requires its extension API; it does not silently substitute
-another backend during loading.
-
-This setting also works in `model_config={"w8_qmv_backend": "w8a16"}` or
-`config.json` for MLX LM loaders using this model implementation. `--dtype`
-preserves the optimized operators' FP32 channel scales. Adapters are installed
-after loading, retain both weight representations, and change the in-memory
-parameter tree; save the original affine checkpoint before installing them.
-W8A8 activation quantization and W8A16 post-dot FP32 scaling have different
-numerical semantics from native affine W8A16. Historical microbenchmark gains
-do not establish end-to-end generation throughput for this loader.
+Actual loading choices are recorded in result metadata. Explicit W8 implementations
+remain available for private numerical/operator diagnostics, not as user loading
+preferences. Historical operator gains do not establish a new global optimum.
 
 ### Select the W4A16 decode implementation
 
@@ -59,7 +33,7 @@ model. Its default is `native`, preserving the existing MLX path. Set it to
 FFN down projections, including the compiled model paths:
 
 ```sh
-.venv/bin/spark-mlx-generate \
+.venv/bin/spark-mlx generate \
     --model /path/to/Spark-X2.6-4B-INT4-MLX \
     --w4-qmv-backend splitk \
     --prompt '你好' --max-tokens 128
@@ -122,8 +96,8 @@ so replacing same-shaped parameters does not reuse captured old parameters.
 Multi-token prefill retains the compiled native affine path; CPU and other
 activation dtypes use the native fallback. The same adapter can wrap `lm_head`.
 
-Model loading now enables this adapter by default for existing W8 output/head
-projections through `w8_qmv_backend="w8a16"`. W4 and unquantized layers retain
+Private operator diagnostics can install this adapter explicitly. Production target
+loading keeps the automatic native route. W4 and unquantized layers retain
 their original weight precision. Both parameter representations remain resident. Prefill retains the
 fallback's BF16 metadata, while decode uses the supplied FP32 scales, so this
 is not a claim of numerical equivalence across phases or to the original
@@ -164,7 +138,7 @@ their own calls.
 
 | Owner | Configuration fields | Consumers |
 | --- | --- | --- |
-| `linear.LinearConfig` | `w8_qmv_backend`, `w4_qmv_backend` | Linear adapters, QKV and FFN |
+| `linear.LinearConfig` | `w4_qmv_backend`; resolved W8 policy is internal | Linear adapters, QKV and FFN |
 | `sdpa.SDPAConfig` | `fused_quantized_sdpa`, `fused_quantized_sdpa_prefill`, `tuned_bf16_sdpa` | SDPA |
 | Automatic composite operators | No additional switches | Gated output and eligible compiled graphs |
 
@@ -175,7 +149,7 @@ Partial loader overrides are checked without assuming missing checkpoint values.
 
 `ModelArgs` inherits the two keyword-only config mixins alongside MLX-LM's
 `BaseModelArgs`. Existing flat checkpoint fields and loader/CLI option names
-remain flat; the W8 selector is now named `w8_qmv_backend`. Operator fields are not duplicated in
+remain flat; legacy W8 path preferences no longer control production loading. Operator fields are not duplicated in
 `model.py`. Operator functions keep their own typed signatures rather than
 inheriting a generic dispatcher with opaque positional arguments.
 

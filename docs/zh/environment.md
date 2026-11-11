@@ -103,7 +103,7 @@ uv 会创建 `.venv`，以可编辑方式安装本项目及运行依赖。
 具体行为见 [uv 同步说明](https://docs.astral.sh/uv/concepts/projects/sync/)。
 
 下文直接使用 `.venv/bin/python`，无需先激活环境。若希望直接使用 `python`
-和 `spark-mlx-generate` 等命令，可以激活环境，并将编辑器解释器设为
+和 `spark-mlx generate` 等命令，可以激活环境，并将编辑器解释器设为
 仓库下的 `.venv/bin/python`：
 
 ```sh
@@ -137,7 +137,7 @@ assert (mx.array([1, 2, 3]) + 1).tolist() == [2, 3, 4]
 print("GPU computation: OK")
 PY
 
-.venv/bin/spark-mlx-generate --help
+.venv/bin/spark-mlx generate --help
 ```
 
 Metal 环境应显示 `metal available: True`，CUDA 环境应显示
@@ -192,7 +192,7 @@ MLX 路径。M1–M4 不会被整体禁用，M5 专用算子仍由扩展自己�
 
 ```sh
 .venv/bin/python -m spark_mlx_llm.extension
-SPARK_MLX_DISABLE_EXT=1 .venv/bin/spark-mlx-generate --model /path/to/model --prompt '你好'
+SPARK_MLX_DISABLE_EXT=1 .venv/bin/spark-mlx generate --model /path/to/model --prompt '你好'
 ```
 
 发布 macOS 14/15 兼容包时，Python、`mlx`、`mlx-metal` 等所有原生二进制都需要
@@ -201,29 +201,28 @@ SPARK_MLX_DISABLE_EXT=1 .venv/bin/spark-mlx-generate --model /path/to/model --pr
 ## 6. 运行一次模型推理
 
 准备本地 Spark2_5 模型目录，并替换下面的路径。`compressed-tensors` 格式的
-INT4 / INT8 checkpoint 需要先[转换为 MLX 格式](examples.md#1-python-模型转换)。
+INT4 / INT8 checkpoint 需要先[转换为 MLX 格式](../../example/python_convert.py)。
 
 ```sh
-.venv/bin/spark-mlx-generate \
+.venv/bin/spark-mlx generate \
   --model /path/to/spark2_5-mlx \
   --device gpu \
   --prompt '你好，请简单介绍自己。' \
   --max-tokens 32 \
-  --temp 0 \
+  --temperature 0 \
   --seed 0 \
-  --w8-qmv-backend native \
   --no-fused-quantized-sdpa
 ```
 
 这里显式选择原生 W8 路径并关闭扩展 INT8 KV 融合，便于先验证基础推理。
-通过 `spark-mlx-generate --help` 查看算子开关，更多用法见[示例](examples.md)。
+通过 `spark-mlx generate --help` 查看算子开关，更多用法见[示例](examples.md)。
 
 ## 7. 常见问题
 
 | 现象 | 处理方式 |
 | --- | --- |
 | 找不到 `metal` 编译器或 MetalPerformancePrimitives 头文件 | 安装完整的兼容 Xcode 工具链及所需组件，检查 `xcrun --find metal` 和当前 SDK；仅有命令行工具可能不足 |
-| 找不到 `spark-mlx-generate` | 使用 `.venv/bin/spark-mlx-generate`，或先激活环境；确认已安装本项目 |
+| 找不到 `spark-mlx generate` | 使用 `.venv/bin/spark-mlx generate`，或先激活环境；确认已安装本项目 |
 | Apple Silicon 找不到匹配的 MLX wheel | 检查 Python 架构是否为 `arm64`，以及 Python / macOS 版本是否匹配 wheel；避免通过 Rosetta 使用 x86 Python |
 | Linux 找不到匹配的 MLX wheel | 检查 CPU 架构、glibc 版本及所选后端；当前 Linux wheel 要求 glibc >= 2.35 |
 | CUDA 后端不可用 | 先用 `nvidia-smi` 检查驱动与设备，再确认选择了匹配的 `cuda12` 或 `cuda13` extra |

@@ -1,474 +1,206 @@
-"""Shared inference settings, generation defaults and mixed KV cache handling."""
+"""The single public generation API, shared by every inference frontend."""
 
-import argparse
+import hashlib
 import json
-import math
-from collections.abc import Mapping
+import logging
 from copy import deepcopy
-from dataclasses import dataclass, field, fields, replace
-from pathlib import Path
+from dataclasses import dataclass, replace
 
-from mlx_lm import generate as mlx_generate
-from mlx_lm import stream_generate as mlx_stream_generate
-from mlx_lm.models.cache import QuantizedKVCache, RotatingKVCache
-from mlx_lm.models.cache import make_prompt_cache as mlx_make_prompt_cache
+from .config import GenerationConfig
+from .dspark.metrics import GenerationResult
 
-__all__ = [
-    "GenerationConfig",
-    "generate",
-    "make_prompt_cache",
-    "stream_generate",
-]
-
-_KV_FIELDS = (
-    "prefill_step_size",
-    "kv_bits",
-    "kv_group_size",
-    "quantized_kv_start",
-    "kv_quantization_scope",
-)
+__all__ = ["GenerationConfig", "GenerationResult", "GenerationChunk", "generate"]
+logger = logging.getLogger(__name__)
 
 
-def _json_object(value):
-    try:
-        result = json.loads(value)
-    except ValueError as error:
-        raise argparse.ArgumentTypeError(f"Invalid JSON: {error}") from error
-    if not isinstance(result, dict):
-        raise argparse.ArgumentTypeError("Expected a JSON object")
-    return result
+@dataclass(frozen=True)
+class GenerationChunk:
+    text: str = ""
+    token_id: int | None = None
+    from_draft: bool = False
+    result: GenerationResult | None = None
 
-
-class _TemplateArguments(Mapping):
-    """Read-only snapshot whose nested values are copied on access."""
-
-    def __init__(self, values):
-        self._values = deepcopy(dict(values))
-
-    def __getitem__(self, name):
-        return deepcopy(self._values[name])
-
-    def __iter__(self):
-        return iter(self._values)
-
-    def __len__(self):
-        return len(self._values)
-
-    def __repr__(self):
-        return repr(self._values)
-
-
-@dataclass(frozen=True, kw_only=True)
-class GenerationConfig:
-    """Sampling, templates and Spark KV defaults, exported by purpose.
-
-    None for thinking settings preserves the model template. KV caches retain
-    model precision by default, matching chat/server's upstream behavior.
-    KV quantization is opt-in and independent of checkpoint quantization.
-    """
-
-    max_tokens: int = 512
-    temperature: float = 0.0
-    top_p: float = 1.0
-    top_k: int = 0
-    min_p: float = 0.0
-    enable_thinking: bool | None = None
-    reasoning_effort: str | None = None
-    chat_template_kwargs: Mapping = field(default_factory=dict)
-    prefill_step_size: int = 512
-    kv_bits: int | None = None
-    kv_group_size: int = 32
-    quantized_kv_start: int = 0
-    kv_quantization_scope: str = "full-attention"
-
-    def __post_init__(self):
-        for name, minimum in (
-            ("max_tokens", 1),
-            ("top_k", 0),
-            ("prefill_step_size", 1),
-            ("quantized_kv_start", 0),
-        ):
-            value = getattr(self, name)
-            if type(value) is not int or value < minimum:
-                raise ValueError(f"{name} must be an integer >= {minimum}")
-        for name in ("temperature", "top_p", "min_p"):
-            value = getattr(self, name)
-            if (
-                type(value) not in (int, float)
-                or not math.isfinite(value)
-                or value < 0
-                or (name != "temperature" and value > 1)
-            ):
-                bounds = ">= 0" if name == "temperature" else "between 0 and 1"
-                raise ValueError(f"{name} must be a finite number {bounds}")
-        if not isinstance(self.chat_template_kwargs, Mapping):
-            raise TypeError("chat_template_kwargs must be a JSON object")
-        extras = dict(self.chat_template_kwargs)
-        reserved = {
-            "messages",
-            "tools",
-            "tokenize",
-            "add_generation_prompt",
-        } & extras.keys()
-        if reserved:
-            raise ValueError(f"Reserved chat template arguments: {sorted(reserved)}")
-        # Normalize known template fields so later layers can override either form.
-        for name in ("enable_thinking", "reasoning_effort"):
-            if name in extras:
-                value = extras.pop(name)
-                if getattr(self, name) is None:
-                    object.__setattr__(self, name, value)
-        object.__setattr__(self, "chat_template_kwargs", _TemplateArguments(extras))
-        if self.enable_thinking is not None and type(self.enable_thinking) is not bool:
-            raise ValueError("enable_thinking must be true, false or null")
-        if self.reasoning_effort not in (None, "low", "high"):
-            raise ValueError("reasoning_effort must be 'low', 'high' or null")
-        if self.kv_bits is not None and (
-            type(self.kv_bits) is not int or self.kv_bits not in (4, 8)
-        ):
-            raise ValueError("kv_bits must be None, 4 or 8")
-        if type(self.kv_group_size) is not int or self.kv_group_size not in (
-            32,
-            64,
-            128,
-        ):
-            raise ValueError("kv_group_size must be 32, 64 or 128")
-        if self.kv_quantization_scope not in ("all", "full-attention"):
-            raise ValueError("kv_quantization_scope must be 'all' or 'full-attention'")
-
-    def overlay(self, values):
-        """Merge a higher-priority layer; named thinking options win within a layer."""
-        if not isinstance(values, dict):
-            raise TypeError("Generation configuration must be a JSON object")
-        unknown = values.keys() - {item.name for item in fields(self)}
-        if unknown:
-            raise ValueError(f"Unknown generation settings: {sorted(unknown)}")
-        changes = dict(values)
-        extras = changes.pop("chat_template_kwargs", {})
-        if not isinstance(extras, Mapping):
-            raise TypeError("chat_template_kwargs must be a JSON object")
-        extras = dict(extras)
-        for name in ("enable_thinking", "reasoning_effort"):
-            if name in extras:
-                changes.setdefault(name, extras.pop(name))
-        return replace(
-            self,
-            chat_template_kwargs={**self.chat_template_kwargs, **extras},
-            **changes,
-        )
-
-    @classmethod
-    def from_file(cls, path):
-        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
-
-    @classmethod
-    def from_dict(cls, values):
-        """Build a configuration, rejecting unknown fields and invalid values."""
-        return cls().overlay(values)
-
-    @classmethod
-    def from_options(cls, values):
-        """Extract configuration fields from mixed options, such as vars(args)."""
-        if not isinstance(values, Mapping):
-            raise TypeError("Generation options must be a mapping")
-        return cls.from_dict(
-            {f.name: values[f.name] for f in fields(cls) if f.name in values}
-        )
-
-    def sampler_kwargs(self):
+    def to_dict(self):
         return {
-            "temp": self.temperature,
-            "top_p": self.top_p,
-            "top_k": self.top_k,
-            "min_p": self.min_p,
+            "text": self.text, "token_id": self.token_id, "from_draft": self.from_draft,
+            "result": self.result.to_dict() if self.result is not None else None,
         }
 
-    def template_kwargs(self):
-        result = dict(self.chat_template_kwargs)
-        for name in ("enable_thinking", "reasoning_effort"):
-            value = getattr(self, name)
-            if value is not None:
-                result[name] = value
-        return result
 
-    @classmethod
-    def cli_defaults(cls):
-        """Default to low thinking when a CLI applies the model chat template."""
-        return cls(enable_thinking=True, reasoning_effort="low")
+def _messages(prompt):
+    messages = []
+    for message in prompt:
+        if not isinstance(message, dict) or not isinstance(message.get("role"), str):
+            raise ValueError("Each message must be an object with a role")
+        message = deepcopy(message)
+        content = message.get("content", "")
+        if content is None and message.get("tool_calls"):
+            content = ""
+        if isinstance(content, list):
+            if any(not isinstance(p, dict) or p.get("type") != "text" or not isinstance(p.get("text"), str) for p in content):
+                raise ValueError("Only text message content is supported")
+            content = "".join(part["text"] for part in content)
+        if not isinstance(content, str):
+            raise ValueError("Message content must be text or text parts")
+        for call in message.get("tool_calls") or []:
+            if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
+                raise ValueError("tool_calls must contain function objects")
+            function = call["function"]
+            arguments = function.get("arguments")
+            if isinstance(arguments, str):
+                arguments = json.loads(arguments)
+            if not isinstance(arguments, dict):
+                raise ValueError("tool_call.function.arguments must be a JSON object")
+            function["arguments"] = arguments
+        messages.append({**message, "content": content})
+    return messages
 
-    @classmethod
-    def add_arguments(cls, parser, *, include_kv=True):
-        defaults = cls()
-        group = parser.add_argument_group("shared inference settings")
-        group.add_argument(
-            "--config", help="Shared inference settings from a JSON file"
+
+def _encode_prompt(tokenizer, prompt, config, tools=None):
+    if tools is not None and (not isinstance(tools, list) or any(not isinstance(t, dict) for t in tools)):
+        raise ValueError("tools must be a list of objects")
+    is_messages = isinstance(prompt, (list, tuple)) and bool(prompt) and isinstance(prompt[0], dict)
+    if is_messages or (isinstance(prompt, str) and config.apply_chat_template):
+        if tokenizer is None or not getattr(tokenizer, "has_chat_template", False):
+            if is_messages or tools:
+                raise ValueError("Messages and tools require a chat template")
+        else:
+            if is_messages and not config.apply_chat_template:
+                raise ValueError("Message inputs require apply_chat_template=True")
+            messages = _messages(prompt) if is_messages else [{"role": "user", "content": prompt}]
+            template = config.template_kwargs()
+            if tools is not None:
+                template["tools"] = tools
+            prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, **template)
+    elif tools:
+        raise ValueError("tools require a chat-template input")
+    if isinstance(prompt, str):
+        if tokenizer is None:
+            raise ValueError("Text prompts require a tokenizer")
+        ids = list(tokenizer.encode(prompt, add_special_tokens=False))
+    else:
+        ids = list(prompt.tolist() if hasattr(prompt, "tolist") else prompt)
+    if not ids:
+        raise ValueError("Prompt contains no tokens")
+    return ids
+
+
+def _context_limit(runtime, config):
+    limits = [runtime.config.get("max_position_embeddings"), config.max_context_length]
+    limits = [limit for limit in limits if limit is not None]
+    return min(limits) if limits else None
+
+
+def _prompt_ids(runtime, tokenizer, prompt, config, tools):
+    ids = _encode_prompt(tokenizer, prompt, config, tools)
+    vocab_size = runtime.config["vocab_size"]
+    if not ids or any(type(t) is not int or not 0 <= t < vocab_size for t in ids):
+        raise ValueError("Prompt must contain nonempty valid token IDs")
+    limit = _context_limit(runtime, config)
+    if limit is not None and (len(ids) >= limit or (config.max_tokens is not None and len(ids) + config.max_tokens > limit)):
+        raise ValueError(
+            f"Prompt plus max_tokens exceeds context limit={limit} "
+            "(model capacity or max_context_length)"
         )
-        # Suppressed defaults distinguish explicit CLI values from file defaults.
-        for flags, name, kind in (
-            (("--max-tokens", "-m"), "max_tokens", int),
-            (("--temp", "--temperature"), "temperature", float),
-            (("--top-p",), "top_p", float),
-            (("--top-k",), "top_k", int),
-            (("--min-p",), "min_p", float),
-        ):
-            group.add_argument(
-                *flags,
-                dest=name,
-                type=kind,
-                default=argparse.SUPPRESS,
-                help=f"{name} (default: {getattr(defaults, name)})",
-            )
-        group.add_argument(
-            "--thinking",
-            dest="enable_thinking",
-            action=argparse.BooleanOptionalAction,
-            default=argparse.SUPPRESS,
-            help="Enable/disable thinking (default: enabled)",
-        )
-        group.add_argument(
-            "--reasoning-effort",
-            choices=("low", "high"),
-            default=argparse.SUPPRESS,
-            help="Thinking effort (default: low)",
-        )
-        group.add_argument(
-            "--chat-template-args",
-            dest="chat_template_kwargs",
-            type=_json_object,
-            default=argparse.SUPPRESS,
-            help="Additional chat-template arguments as a JSON object",
-        )
-        if include_kv:
-            cls.add_kv_arguments(parser, suppress_defaults=True)
-
-    @classmethod
-    def from_args(cls, parser, args, *, include_kv=True):
-        try:
-            values = (
-                json.loads(Path(args.config).read_text(encoding="utf-8"))
-                if args.config
-                else {}
-            )
-            if not include_kv and isinstance(values, dict):
-                unsupported = values.keys() & set(_KV_FIELDS)
-                if unsupported:
-                    raise ValueError(
-                        "KV/prefill settings in --config are only supported by "
-                        f"spark-mlx-generate: {sorted(unsupported)}"
-                    )
-            defaults = (
-                cls()
-                if getattr(args, "ignore_chat_template", False)
-                else cls.cli_defaults()
-            )
-            config = defaults.overlay(values)
-            values = vars(args)
-            return config.overlay(
-                {
-                    item.name: values[item.name]
-                    for item in fields(cls)
-                    if item.name in values
-                    and (include_kv or item.name not in _KV_FIELDS)
-                }
-            )
-        except (OSError, TypeError, ValueError) as error:
-            parser.error(str(error))
-
-    @classmethod
-    def add_kv_arguments(cls, parser, *, suppress_defaults=False):
-        """Register only KV/prefill flags for benchmarks and dataset runners."""
-        defaults = cls()
-        group = parser.add_argument_group("Spark KV and prefill settings")
-        group.add_argument(
-            "--prefill-step-size",
-            type=_positive_int,
-            default=argparse.SUPPRESS
-            if suppress_defaults
-            else defaults.prefill_step_size,
-            help=f"Prompt chunk size (default: {defaults.prefill_step_size})",
-        )
-        group.add_argument(
-            "--kv-bits",
-            type=_kv_bits,
-            choices=(None, 4, 8),
-            metavar="{none,4,8}",
-            default=argparse.SUPPRESS if suppress_defaults else defaults.kv_bits,
-            help="KV quantization bits (default: none); 'none' keeps model precision",
-        )
-        group.add_argument(
-            "--kv-group-size",
-            type=int,
-            choices=(32, 64, 128),
-            default=argparse.SUPPRESS if suppress_defaults else defaults.kv_group_size,
-        )
-        group.add_argument(
-            "--quantized-kv-start",
-            type=_nonnegative_int,
-            default=argparse.SUPPRESS
-            if suppress_defaults
-            else defaults.quantized_kv_start,
-        )
-        group.add_argument(
-            "--kv-quantization-scope",
-            choices=("all", "full-attention"),
-            default=(
-                argparse.SUPPRESS
-                if suppress_defaults
-                else defaults.kv_quantization_scope
-            ),
-            help="When KV quantization is enabled, default to full-attention layers only",
-        )
-
-    def kv_kwargs(self):
-        """Options for this package's generate/stream_generate, excluding sampling."""
-        return {name: getattr(self, name) for name in _KV_FIELDS}
-
-    def prepare_kv_kwargs(self, model, *, prompt_cache=None, max_kv_size=None):
-        """Prepare upstream options, retaining MLX-LM's conversion timing."""
-        options = self.kv_kwargs()
-        options.pop("kv_quantization_scope")
-        if self.kv_bits is not None:
-            prompt_cache = make_prompt_cache(
-                model,
-                self.kv_quantization_scope,
-                prompt_cache=prompt_cache,
-                max_kv_size=max_kv_size,
-            )
-        if prompt_cache is not None:
-            options["prompt_cache"] = prompt_cache
-        return options
+    return ids
 
 
-class _UnquantizedRotatingKVCache(RotatingKVCache):
-    """Preserve sliding-window state during upstream KV quantization checks."""
+def generate(model, tokenizer, prompt, *, config=None, stream=False, tools=None):
+    """Return a GenerationResult, or GenerationChunk iterator when stream=True.
 
-    def to_quantized(self, group_size=32, bits=8):
-        return self
-
-
-def make_prompt_cache(
-    model,
-    kv_quantization_scope="full-attention",
-    *,
-    prompt_cache=None,
-    max_kv_size=None,
-):
-    """Prepare mixed caches; conversion still happens at MLX-LM's step boundaries.
-
-    A supplied cache list is updated in place so repeated generation continues
-    the same cache. Newly created caches preserve all rotating-cache state.
+    Target-only and speculative decoding use this same API, configuration and
+    timing convention. No sampler/keyword aliases or separate streaming API.
     """
-    if kv_quantization_scope not in ("all", "full-attention"):
-        raise ValueError(f"Unknown KV quantization scope: {kv_quantization_scope}")
-    caches = (
-        mlx_make_prompt_cache(model, max_kv_size)
-        if prompt_cache is None
-        else prompt_cache
+    if config is None:
+        config = GenerationConfig()
+    elif isinstance(config, dict):
+        config = GenerationConfig.from_dict(config)
+    elif not isinstance(config, GenerationConfig):
+        raise TypeError("config must be a GenerationConfig or a JSON object")
+    if type(stream) is not bool:
+        raise ValueError("stream must be a boolean")
+    runtime = getattr(model, "_spark_runtime", None)
+    if runtime is None:
+        raise TypeError("model must come from spark_mlx_llm.load")
+    if tokenizer is not runtime.tokenizer:
+        raise ValueError("Use the tokenizer returned with this model")
+    if not config.stop_at_eos:
+        runtime = replace(runtime, generation_config={"eos_token_id": []})
+    ids = _prompt_ids(runtime, tokenizer, prompt, config, tools)
+    max_tokens = config.max_tokens
+    context_limit = _context_limit(runtime, config)
+    if config.max_context_length is not None and max_tokens is None:
+        max_tokens = context_limit - len(ids)
+    available = runtime.drafter.config.max_draft_tokens if runtime.drafter is not None else 0
+    cap = min(config.max_draft_tokens, available)
+    if cap and config.kv_bits is not None:
+        raise ValueError("Quantized KV requires max_draft_tokens=0; speculative KV retains model precision")
+    if not cap and config.confidence_threshold:
+        raise ValueError("confidence_threshold requires an active draft model")
+    import mlx.core as mx
+    from .dspark.generation import _generate_events as engine
+    from .dspark.sampling import SamplingOptions
+
+    stochastic_gpu = bool(cap and config.temperature > 0 and mx.default_device() == mx.gpu)
+    requested = config.to_dict()
+    effective = {
+        **requested, "requested": requested, "stream": stream,
+        "device": str(mx.default_device()),
+        "max_draft_tokens": cap,
+        "max_tokens": max_tokens,
+        "max_context_length": context_limit if config.max_context_length is not None else None,
+        "asynchronous_draft": bool(config.asynchronous_draft and stochastic_gpu and not config.confidence_threshold),
+        "async_context": bool(config.async_context and stochastic_gpu),
+        "load": getattr(model, "_spark_load_options", {}),
+    }
+    encoded = json.dumps(effective, sort_keys=True, separators=(",", ":"))
+    effective["sha256"] = hashlib.sha256(encoded.encode()).hexdigest()
+    prompt_hash = hashlib.sha256(json.dumps(ids, separators=(",", ":")).encode()).hexdigest()
+    logger.info("Effective generation config: %s", json.dumps(effective, sort_keys=True))
+    if config.cache_limit_mib is not None:
+        mx.set_cache_limit(config.cache_limit_mib * 1024**2)
+    if config.clear_cache:
+        mx.synchronize()
+        mx.clear_cache()
+    events = engine(
+        runtime, ids, mode="dspark" if cap else "baseline",
+        max_new_tokens=max_tokens, max_draft_tokens=cap,
+        sampling=SamplingOptions(config.temperature, config.top_p, config.top_k, config.min_p),
+        draft_sampling=SamplingOptions(config.draft_temperature, config.draft_top_p, config.draft_top_k),
+        seed=config.seed, prefill_chunk_size=config.prefill_step_size,
+        confidence_threshold=config.confidence_threshold,
+        asynchronous_draft=config.asynchronous_draft, async_context=config.async_context,
+        compile_draft_chain=config.compile_draft_chain, apply_chat_template=False,
+        kv_config=config,
     )
-    replacements = []
-    for index, cache in enumerate(caches):
-        if isinstance(cache, RotatingKVCache):
-            if kv_quantization_scope == "all":
-                raise ValueError(
-                    "KV quantization scope 'all' includes unsupported RotatingKVCache; "
-                    "use --kv-quantization-scope full-attention"
-                )
-            if type(cache) is _UnquantizedRotatingKVCache:
-                continue
-            if type(cache) is not RotatingKVCache:
-                raise ValueError(
-                    "KV quantization scope 'full-attention' cannot preserve custom "
-                    f"RotatingKVCache subclass {type(cache).__name__}"
-                )
-            preserved = _UnquantizedRotatingKVCache.__new__(_UnquantizedRotatingKVCache)
-            preserved.__dict__.update(cache.__dict__)
-            replacements.append((index, preserved))
-        elif not hasattr(cache, "to_quantized") and not isinstance(
-            cache, QuantizedKVCache
-        ):
-            raise ValueError(
-                f"KV cache layer {index} ({type(cache).__name__}) does not support KV quantization"
-            )
-    for index, cache in replacements:
-        caches[index] = cache
-    return caches
+    if stream:
+        return _chunks(events, runtime, effective, prompt_hash)
+    try:
+        for event in events:
+            if isinstance(event, GenerationResult):
+                return replace(event, effective_config=effective, prompt_sha256=prompt_hash)
+    finally:
+        events.close()
+    raise RuntimeError("Generation ended without a result")
 
 
-def _prepare_generation_kwargs(model, kwargs):
-    # Only consume KV settings: max_tokens, sampler and all other upstream options
-    # retain their existing values and validation semantics (e.g. max_tokens=-1).
-    kwargs = dict(kwargs)
-    config = GenerationConfig(
-        **{name: kwargs.pop(name) for name in _KV_FIELDS if name in kwargs}
-    )
-    # MLX-LM speculative decoding expects one combined target/draft cache list.
-    if config.kv_bits is not None and kwargs.get("prompt_cache") is None:
-        draft = kwargs.get("draft_model")
-        if draft is not None:
-            kwargs["prompt_cache"] = mlx_make_prompt_cache(
-                model
-            ) + mlx_make_prompt_cache(draft)
-    kwargs.update(
-        config.prepare_kv_kwargs(
-            model,
-            prompt_cache=kwargs.get("prompt_cache"),
-            max_kv_size=kwargs.get("max_kv_size"),
-        )
-    )
-    return kwargs
+def _chunks(events, runtime, effective, prompt_hash):
+    from .dspark.tokenization import eos_token_ids
 
-
-def generate(
-    model,
-    tokenizer,
-    prompt,
-    verbose=False,
-    *,
-    max_tokens=GenerationConfig.max_tokens,
-    **kwargs,
-):
-    """Generate up to 512 tokens, keeping model KV precision unless kv_bits is set."""
-    return mlx_generate(
-        model,
-        tokenizer,
-        prompt,
-        verbose=verbose,
-        max_tokens=max_tokens,
-        **_prepare_generation_kwargs(model, kwargs),
-    )
-
-
-def stream_generate(
-    model,
-    tokenizer,
-    prompt,
-    max_tokens=GenerationConfig.max_tokens,
-    draft_model=None,
-    **kwargs,
-):
-    """Stream up to 512 tokens, keeping model KV precision unless kv_bits is set."""
-    return mlx_stream_generate(
-        model,
-        tokenizer,
-        prompt,
-        max_tokens=max_tokens,
-        **_prepare_generation_kwargs(model, {**kwargs, "draft_model": draft_model}),
-    )
-
-
-def _positive_int(value):
-    value = int(value)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be positive")
-    return value
-
-
-def _nonnegative_int(value):
-    value = int(value)
-    if value < 0:
-        raise argparse.ArgumentTypeError("must be nonnegative")
-    return value
-
-
-def _kv_bits(value):
-    return None if value.lower() == "none" else int(value)
+    detokenizer = runtime.tokenizer.detokenizer
+    detokenizer.reset()
+    eos = eos_token_ids(runtime)
+    try:
+        for event in events:
+            if isinstance(event, GenerationResult):
+                detokenizer.finalize()
+                tail = detokenizer.last_segment
+                yield GenerationChunk(tail, result=replace(event, effective_config=effective, prompt_sha256=prompt_hash))
+            else:
+                text = ""
+                if event.token_id not in eos:
+                    detokenizer.add_token(event.token_id)
+                    text = detokenizer.last_segment
+                yield GenerationChunk(text, event.token_id, event.from_draft)
+    finally:
+        events.close()

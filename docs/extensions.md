@@ -55,10 +55,9 @@ The extension also exposes an explicit
 Installing it does not automatically change the model's quantization or
 replace its output projections.
 
-For an already converted MLX checkpoint, select `w8_qmv_backend="auto"` and
-enable metadata-driven W8A8 by adding
-`input_activations` to each desired output projection's entry under
-`config.json` → `quantization_config`:
+Production loading automatically selects its W8 routes and ignores historical
+checkpoint backend preferences. W8A8 remains an explicit operator API for numerical
+diagnostics; its activation scheme can be described by the following metadata:
 
 ```json
 "model.layers.0.self_attn.out_proj": {
@@ -110,7 +109,7 @@ print("Extension ready:", version("spark-mlx-ext"))
 PY
 ```
 
-With `w8_qmv_backend="native"` and `fused_quantized_sdpa=False`, generation
+With the automatic native target W8 policy and `fused_quantized_sdpa=False`, generation
 uses the existing compiled or standard paths without requiring extension operators.
 An installed but incompatible extension raises an import error. On a supported
 Apple Silicon host, rebuild the configured version with

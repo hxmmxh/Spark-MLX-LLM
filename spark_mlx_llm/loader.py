@@ -1,186 +1,114 @@
+"""One public loader for target-only and speculative inference."""
+
+import json
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
 
-import mlx.core as mx
-from huggingface_hub import snapshot_download
-from mlx import nn
-from mlx.utils import tree_map_with_path
-from mlx_lm.tokenizer_utils import load as load_tokenizer
-from mlx_lm.utils import load_model
+from ._target_loader import _get_model_classes, _resolve_model_path
 
-from .model import Model, ModelArgs
-from .model_source import (
-    load_uncached_model_source,
-    model_cache_enabled,
-    prepare_model_source,
-)
-from .ops.linear import LinearConfig, QuantizedProjections
-from .ops.sdpa import SDPAConfig
-
-MODEL_ALLOW_PATTERNS = [
-    "*.json",
-    "model*.safetensors",
-    "*.py",
-    "tokenizer.model",
-    "*.tiktoken",
-    "tiktoken.model",
-    "*.txt",
-    "*.jsonl",
-    "*.jinja",
-]
-
-
-def _resolve_model_path(path_or_repo: str | Path, revision: str | None):
-    model_path = Path(path_or_repo).expanduser()
-    if model_path.exists():
-        if not model_path.is_dir() and model_path.suffix.lower() != ".gguf":
-            raise NotADirectoryError(f"Model path must be a directory: {model_path}")
-        return model_path
-    if (
-        isinstance(path_or_repo, Path)
-        or model_path.is_absolute()
-        or str(path_or_repo).startswith(("~", "./", "../"))
-    ):
-        raise FileNotFoundError(f"Model directory does not exist: {model_path}")
-
-    return Path(
-        snapshot_download(
-            str(path_or_repo),
-            revision=revision,
-            allow_patterns=MODEL_ALLOW_PATTERNS,
-        )
-    )
-
-
-def _get_model_classes(config: dict):
-    if config.get("model_type") != "spark2_5":
-        raise ValueError(
-            f"Expected model_type 'spark2_5', got {config.get('model_type')!r}"
-        )
-    return Model, ModelArgs
-
-
-def _load_tokenizer(model_path, tokenizer_config, eos_token_ids):
-    return load_tokenizer(
-        model_path,
-        tokenizer_config_extra=tokenizer_config,
-        eos_token_ids=eos_token_ids,
-    )
-
-
-def _load_model_weights(config, weights, *, model_config, lazy, strict):
-    config = {**config, **model_config}
-    model = Model(ModelArgs.from_dict(config))
-    weights = model.sanitize(weights)
-    quantization = config["quantization"]
-
-    def predicate(name, module):
-        if name in quantization:
-            return quantization[name]
-        return hasattr(module, "to_quantized") and name + ".scales" in weights
-
-    nn.quantize(
-        model,
-        group_size=quantization["group_size"],
-        bits=quantization["bits"],
-        mode=quantization.get("mode", "affine"),
-        class_predicate=predicate,
-    )
-    model.eval()
-    model.load_weights(list(weights.items()), strict=strict)
-    if not lazy:
-        mx.eval(model.parameters())
-    return model, config
+__all__ = ["load"]
 
 
 def load(
-    path_or_repo: str | Path,
+    path_or_repo,
     *,
-    tokenizer_config: dict[str, Any] | None = None,
-    model_config: dict[str, Any] | None = None,
-    lazy: bool = False,
-    strict: bool = True,
-    revision: str | None = None,
-    dtype: str | None = None,
-    w8_qmv_backend: str | None = None,
-    w4_qmv_backend: str | None = None,
-    return_config: bool = False,
-    model_cache_dir: str | Path | None = None,
-    model_cache: bool | None = None,
+    draft_model=None,
+    use_draft=True,
+    draft_quantization=None,
+    draft_readout="checkpoint",
+    tokenizer_config=None,
+    model_config=None,
+    lazy=False,
+    strict=True,
+    revision=None,
+    dtype=None,
+    w4_qmv_backend=None,
+    model_cache_dir=None,
+    model_cache=None,
 ):
-    """Prepare INT4 in memory by default; target GGUF uses disk conversion caching."""
-    if model_cache is not None and type(model_cache) is not bool:
-        raise ValueError("model_cache must be a boolean or None")
-    dtypes = {"float32": mx.float32, "bfloat16": mx.bfloat16}
-    if dtype is not None and (not isinstance(dtype, str) or dtype not in dtypes):
-        raise ValueError(f"Unsupported dtype {dtype!r}; choose from {sorted(dtypes)}")
-    model_config = dict(model_config or {})
-    if w4_qmv_backend is not None:
-        model_config["w4_qmv_backend"] = w4_qmv_backend
-    if w8_qmv_backend is not None:
-        model_config["w8_qmv_backend"] = w8_qmv_backend
-    LinearConfig.validate_values(model_config)
-    SDPAConfig.validate_values(model_config)
-    model_path = _resolve_model_path(path_or_repo, revision)
-    model_cache = model_cache_enabled(model_path, model_cache)
-    prepared = load_uncached_model_source(model_path) if not model_cache else None
-    if prepared is not None:
-        config, weights = prepared
-        model, config = _load_model_weights(
-            config, weights, model_config=model_config, lazy=lazy, strict=strict
+    """Return ``(model, tokenizer)``; an optional draft uses the same generate API.
+
+    Merged draft weights are detected automatically. ``use_draft=False`` loads
+    only the target; ``GenerationConfig(max_draft_tokens=0)`` disables drafting
+    for an individual request without reloading the model.
+    """
+    if type(use_draft) is not bool:
+        raise ValueError("use_draft must be a boolean")
+    from .ops.linear import LinearConfig, automatic_w8_backend
+
+    LinearConfig.validate_overrides(model_config or {})
+    tokenizer_config = {"trust_remote_code": False, **(tokenizer_config or {})}
+    if not use_draft and draft_model is not None:
+        raise ValueError("draft_model cannot be supplied with use_draft=False")
+    path = _resolve_model_path(path_or_repo, revision)
+    from .model_source import model_cache_enabled
+
+    model_cache = model_cache_enabled(path, model_cache)
+    raw_path = path / "config.json" if path.is_dir() else None
+    raw = json.loads(raw_path.read_text()) if raw_path and raw_path.is_file() else {}
+    overrides = {
+        "w4_qmv_backend": raw.get("w4_qmv_backend", "multirow"),
+        **(model_config or {}),
+    }
+    for name, value in (("w4_qmv_backend", w4_qmv_backend),):
+        if value is not None:
+            overrides[name] = value
+    merged = False
+    if use_draft and path.is_dir() and any(path.glob("*.safetensors")):
+        from .dspark.checkpoint import inspect_checkpoint
+
+        merged = bool(inspect_checkpoint(path).draft_tensors)
+    if use_draft and (draft_model is not None or merged):
+        from .dspark.loader import _load_pair
+
+        if not strict:
+            raise ValueError("Draft loading requires strict=True")
+        runtime = _load_pair(
+            path, draft_path=draft_model, draft_quantization=draft_quantization,
+            draft_readout=draft_readout, dtype=dtype, lazy=lazy,
+            model_config=overrides, model_cache_dir=model_cache_dir, model_cache=model_cache,
         )
-    else:
-        if model_cache:
-            model_path = prepare_model_source(model_path, cache_dir=model_cache_dir)
-        model, config = load_model(
-            model_path,
-            lazy=lazy,
-            strict=strict,
-            model_config=model_config,
-            get_model_classes=_get_model_classes,
-        )
-    if dtype is not None:
-        target_dtype = dtypes[dtype]
-        scale_paths = QuantizedProjections.scale_paths(model)
-        model.update(
-            tree_map_with_path(
-                lambda path, value: (
-                    value.astype(target_dtype)
-                    if path not in scale_paths
-                    and mx.issubdtype(value.dtype, mx.floating)
-                    else value
-                ),
-                model.parameters(),
+        if tokenizer_config != {"trust_remote_code": False}:
+            from ._target_loader import _load_tokenizer
+            from .model_source import prepare_model_source
+
+            tokenizer_path = (
+                path if path.is_dir()
+                else prepare_model_source(path, cache_dir=model_cache_dir)
             )
+            runtime = replace(runtime, tokenizer=_load_tokenizer(
+                tokenizer_path, tokenizer_config, runtime.config.get("eos_token_id")
+            ))
+        model, tokenizer = runtime.target.model, runtime.tokenizer
+    else:
+        from ._target_loader import load as load_target
+        from .dspark.loader import ModelPair
+
+        if draft_quantization is not None or draft_readout != "checkpoint":
+            raise ValueError("Draft loading options require a draft model")
+        model, tokenizer, config = load_target(
+            path, tokenizer_config=tokenizer_config, model_config=overrides,
+            lazy=lazy, strict=strict, dtype=dtype, return_config=True,
+            model_cache_dir=model_cache_dir, model_cache=model_cache,
         )
-        if not lazy:
-            mx.eval(model.parameters())
-    tokenizer = _load_tokenizer(
-        model_path,
-        tokenizer_config or {},
-        config.get("eos_token_id"),
-    )
-
-    if return_config:
-        return model, tokenizer, config
+        generation_path = path / "generation_config.json" if path.is_dir() else None
+        generation_config = (
+            json.loads(generation_path.read_text())
+            if generation_path and generation_path.is_file()
+            else {"eos_token_id": list(tokenizer.eos_token_ids)}
+        )
+        runtime = ModelPair(SimpleNamespace(model=model), None, tokenizer, config, generation_config)
+    # Store metadata outside nn.Module's parameter tree: runtime points back to
+    # its target and must not become a recursively traversed model parameter.
+    object.__setattr__(model, "_spark_runtime", runtime)
+    object.__setattr__(model, "_spark_load_options", {
+        "model": str(path.resolve()), "draft_model": str(Path(draft_model).expanduser().resolve()) if draft_model is not None else None,
+        "draft_loaded": runtime.drafter is not None,
+        "draft_quantization": (runtime.draft_quantization or {}).get("policy"),
+        "dtype": dtype, "model_cache": model_cache,
+        "model_config": overrides,
+        "w4_qmv_backend": runtime.config.get("w4_qmv_backend", overrides["w4_qmv_backend"]),
+        "w8_qmv_backend": automatic_w8_backend(),
+    })
     return model, tokenizer
-
-
-def load_without_model_cache(path, *, adapter_path=None, **kwargs):
-    """Upstream chat/server loader adapter for the no-cache CLI mode."""
-    model, tokenizer, config = load(
-        path,
-        model_cache=False,
-        return_config=True,
-        **{k: v for k, v in kwargs.items() if k != "return_config"},
-    )
-    if adapter_path is not None:
-        from mlx_lm.utils import load_adapters
-
-        model = load_adapters(model, adapter_path)
-        model.eval()
-    return (
-        (model, tokenizer, config)
-        if kwargs.get("return_config")
-        else (model, tokenizer)
-    )

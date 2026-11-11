@@ -108,7 +108,7 @@ with `--all-extras`.
 an error instead of updating it. See [uv synchronization](https://docs.astral.sh/uv/concepts/projects/sync/).
 
 The following sections use `.venv/bin/python`, so activation is unnecessary.
-To use commands such as `python` and `spark-mlx-generate` directly, activate the
+To use commands such as `python` and `spark-mlx generate` directly, activate the
 environment. Configure your editor to use `.venv/bin/python` in the repository:
 
 ```sh
@@ -143,7 +143,7 @@ assert (mx.array([1, 2, 3]) + 1).tolist() == [2, 3, 4]
 print("GPU computation: OK")
 PY
 
-.venv/bin/spark-mlx-generate --help
+.venv/bin/spark-mlx generate --help
 ```
 
 A Metal environment should report `metal available: True`; a CUDA environment
@@ -204,7 +204,7 @@ control M5-only operators. Inspect availability or disable it before process sta
 
 ```sh
 .venv/bin/python -m spark_mlx_llm.extension
-SPARK_MLX_DISABLE_EXT=1 .venv/bin/spark-mlx-generate --model /path/to/model --prompt 'Hello'
+SPARK_MLX_DISABLE_EXT=1 .venv/bin/spark-mlx generate --model /path/to/model --prompt 'Hello'
 ```
 
 A macOS 14/15 release must also contain compatible Python, `mlx`, `mlx-metal`,
@@ -215,22 +215,21 @@ built for newer systems compatible.
 
 Prepare a local Spark2_5 model directory and replace the path below.
 INT4 / INT8 checkpoints in `compressed-tensors` format must first be
-[converted to MLX format](examples.md#1-model-conversion-in-python).
+[converted to MLX format](../../example/python_convert.py).
 
 ```sh
-.venv/bin/spark-mlx-generate \
+.venv/bin/spark-mlx generate \
   --model /path/to/spark2_5-mlx \
   --device gpu \
   --prompt 'Hello, please briefly introduce yourself.' \
   --max-tokens 32 \
-  --temp 0 \
+  --temperature 0 \
   --seed 0 \
-  --w8-qmv-backend native \
   --no-fused-quantized-sdpa
 ```
 
 This example explicitly selects the native W8 path and disables extension INT8
-KV fusion to verify basic inference first. Run `spark-mlx-generate --help`
+KV fusion to verify basic inference first. Run `spark-mlx generate --help`
 for operator switches and see [examples](examples.md) for more usage.
 
 ## 7. Troubleshooting
@@ -238,7 +237,7 @@ for operator switches and see [examples](examples.md) for more usage.
 | Symptom | Action |
 | --- | --- |
 | Missing `metal` compiler or MetalPerformancePrimitives headers | Install a complete compatible Xcode toolchain and required components; check `xcrun --find metal` and the active SDK. Command Line Tools alone may be insufficient |
-| `spark-mlx-generate` not found | Use `.venv/bin/spark-mlx-generate` or activate the environment; confirm this project is installed |
+| `spark-mlx generate` not found | Use `.venv/bin/spark-mlx generate` or activate the environment; confirm this project is installed |
 | No matching MLX wheel on Apple Silicon | Check for `arm64` Python and compatible Python / macOS versions; avoid x86 Python under Rosetta |
 | No matching MLX wheel on Linux | Check CPU architecture, glibc version, and backend selection; current Linux wheels require glibc >= 2.35 |
 | CUDA backend unavailable | Check the driver and devices with `nvidia-smi`, then confirm the matching `cuda12` or `cuda13` extra is installed |

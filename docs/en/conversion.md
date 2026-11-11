@@ -2,7 +2,7 @@
 
 [Project overview](../../README.md) · [简体中文](../zh/conversion.md)
 
-`spark-mlx-convert` converts local Spark BF16 or compressed-tensors INT4
+`spark-mlx convert` converts local Spark BF16 or compressed-tensors INT4
 checkpoints and Spark target GGUF files to MLX format. Conversion runs on CPU
 in chunks without loading the model for inference. Safetensors conversion
 requires NumPy only; GGUF decoding uses the `gguf` package.
@@ -39,7 +39,7 @@ repository root and replace `/path/to/...` with your local paths.
 Inspect configuration and tensor metadata without writing output:
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B-INT4 \
     --inspect
 ```
@@ -50,7 +50,7 @@ for NaNs or precision errors.
 Convert the compressed INT4 model with the default mixed-precision scheme:
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B-INT4 \
     --output /path/to/Spark-X2.6-4B-MLX
 ```
@@ -58,7 +58,7 @@ Convert the compressed INT4 model with the default mixed-precision scheme:
 Quantize a BF16 model with the same scheme:
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B \
     --output /path/to/Spark-X2.6-4B-from-BF16-MLX
 ```
@@ -66,7 +66,7 @@ Quantize a BF16 model with the same scheme:
 To retain BF16 main-model weights, use `--quantization none` with a BF16 source:
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B \
     --output /path/to/Spark-X2.6-4B-BF16-MLX \
     --quantization none
@@ -81,8 +81,7 @@ smaller values reduce temporary memory use during CPU conversion.
 
 Inference entry points default to preparing original compressed-tensors INT4 in
 memory. Integer codes are repacked in row chunks into in-memory MLX affine arrays;
-no converted cache or temporary model file is written. Python's `load(path)` and
-`load_pair(path)` use the same default for INT4 directories.
+no converted cache or temporary model file is written. Python's `load(path)` use the same default for INT4 directories.
 Validation, scale/zero-point rounding and tied BF16 head handling match disk
 conversion. Every startup repeats preparation and needs temporary memory.
 Cache directory options and environment settings are ignored in this mode.
@@ -92,7 +91,7 @@ Explicit convert/export-draft commands still save their requested outputs.
 ### Target GGUF import
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B-Q4_K_M.gguf \
     --output /path/to/Spark-X2.6-4B-from-GGUF-MLX
 ```
@@ -114,7 +113,7 @@ other export policies.
 ### Merge a separate target and draft
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B-INT4 \
     --draft-source /path/to/Spark-X2.6-4B-DSpark.gguf \
     --output /path/to/Spark-X2.6-4B-DSpark-MLX
@@ -134,7 +133,7 @@ drafts too; the output must be disjoint from both sources.
 
 To load without exporting a merged directory, generation and the DSpark HTTP
 service accept `--draft-model`. Python uses
-`load_pair(target_path, draft_path=draft_path)`; see the
+`load(target_path, draft_model=draft_path)`; see the
 [DSpark examples](../../README.md#2-generation-and-chat).
 
 Conversion preserves the draft's stored precision. Floating drafts default to
@@ -184,34 +183,23 @@ When the source ties embedding and `lm_head`, mixed conversion creates a separat
 INT8 `lm_head` and keeps the embedding in BF16. `--quantization none` requires
 BF16 input; it does not dequantize an INT4 checkpoint.
 
-## 4. W8 execution backend
+## 4. Automatic W8 routing
 
-`--w8-backend` selects the inference policy recorded in `config.json` and
-`conversion_manifest.json`. It applies to W8 `out_proj` and `lm_head` under
-mixed quantization and does not change their stored weight codes or scales.
+The converter no longer accepts `--w8-backend` or the Python `w8_backend`
+argument. Outputs describe weight storage rather than a device-specific runtime
+preference and do not introduce A8 activation quantization by default. Legacy
+checkpoint backend preferences remain readable but are ignored.
 
-| Value | Behavior |
-| --- | --- |
-| `w8a8` (default) | Dynamic per-token INT8 activations on the supported Metal path; requires a compatible `spark-mlx-ext`, Apple M5 or newer, and macOS >= 26.2 |
-| `w8a16` | Floating-point activations; uses the optimized per-channel W8A16 path for eligible single-row GPU inputs |
-| `native` | Floating-point activations using ordinary MLX affine operators |
-
-Unavailable optimized backends fall back to MLX affine operators with
-floating-point activations. W8A8 and floating-point activation paths can produce
-different numerical results. All conversions still execute on CPU.
-
-To explicitly select the native path:
+The target retains native W8 arithmetic. INT8 drafts retain BF16 activations:
+single-row W8A16 and NAX on capable M5+ GPUs or matrix multirow kernels on
+compatible older GPUs. Unsupported shapes/devices retain fallbacks. Generation
+metadata records actual choices. Conversion itself continues to run on CPU.
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B-INT4 \
-    --output /path/to/Spark-X2.6-4B-native-MLX \
-    --w8-backend native
+    --output /path/to/Spark-X2.6-4B-MLX
 ```
-
-The output sets `quantize_activations=false` to disable MLX LM's generic
-QQLinear path. When selected and available, this project's W8A8 backend
-performs activation quantization separately.
 
 ## 5. Python API and arguments
 
@@ -223,7 +211,6 @@ The CLI and Python API use the same conversion implementation:
 | `--output` | `output` | Required for conversion; a new directory disjoint from the source |
 | `--inspect` | `inspect_only` | `False`; inspect metadata without writing output or scanning all weight values |
 | `--quantization` | `quantization` | `"mixed"`; `"none"` retains BF16 main-model weights and requires BF16 input |
-| `--w8-backend` | `w8_backend` | `"w8a8"`; also accepts `"w8a16"` or `"native"` |
 | `--chunk-rows` | `chunk_rows` | `256`; a positive number of rows processed per CPU chunk |
 
 ```python
@@ -233,7 +220,6 @@ report = convert_to_mlx(
     source="/path/to/Spark-X2.6-4B-INT4",
     output="/path/to/Spark-X2.6-4B-python-MLX",
     quantization="mixed",
-    w8_backend="native",
     chunk_rows=256,
 )
 print(report["quantized_module_counts"])
@@ -255,7 +241,7 @@ The module entry point is `python -m spark_mlx_llm.commands.convert`;
 `python -m spark_mlx_llm.conversion` remains a compatibility entry point.
 Use `--source` and `--output`; upstream options such as `--hf-path`, `--mlx-path`,
 and `--q-bits` are not supported. See the
-[Python conversion example](examples.md#1-model-conversion-in-python) for a runnable script.
+[Python conversion example](../../example/python_convert.py) for a runnable script.
 
 ## 6. Output and inference
 
@@ -268,11 +254,11 @@ validation; a failed conversion cleans up the temporary directory.
 Run the converted main model:
 
 ```sh
-.venv/bin/spark-mlx-generate \
+.venv/bin/spark-mlx generate \
     --model /path/to/Spark-X2.6-4B-MLX \
     --prompt '你好，请介绍一下自己。' \
     --max-tokens 256 \
-    --no-thinking
+    --no-enable-thinking
 ```
 
 KV precision is controlled separately during generation. All generation entry

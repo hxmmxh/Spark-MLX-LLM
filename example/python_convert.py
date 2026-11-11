@@ -15,7 +15,6 @@ def main():
         source=SOURCE,
         output=OUTPUT,
         quantization="mixed",  # W4/G32 + 逐通道 W8；BF16 输入可用 none 保留精度。
-        w8_backend="native",  # 输出模型的 W8 计算策略，也支持 w8a16 / w8a8。
         chunk_rows=256,  # 每次在 CPU 上处理的行数。
     )
     # 如果只检查结构、不写文件，将上面的调用替换为：

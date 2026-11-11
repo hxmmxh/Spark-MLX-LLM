@@ -1,6 +1,6 @@
 # 算子结构、配置与默认生成行为
 
-更新日期：2026-10-27。
+更新日期：2026-11-11。
 
 算子的配置、分发和实现现在放在同一个模块中。模型负责网络结构与调用顺序；
 各模块用 `__all__` 声明公开接口，私有实现留在模块内部。
@@ -21,29 +21,18 @@
 
 | 参数 | 默认值 | 行为与适用范围 |
 |---|---|---|
-| `w8_qmv_backend` | `"w8a16"` | 已有 W8 attention `out_proj` 和未绑定 embedding 的 W8 `lm_head`，单行 FP16/BF16 GPU 输入采用 per-channel W8A16；多行 prefill 等输入使用原生回退 |
+| W8 路由（自动） | 主模型 native；草稿按设备选择 | 草稿单行 W8A16，多行在 M5+ 使用 NAX，在兼容旧GPU使用 matrix；CPU及不支持形状保留回退 |
 | `w4_qmv_backend` | `"native"` | W4 层保持原生 affine W4A16 |
 | `fused_quantized_sdpa` | `True` | 对满足条件的 INT8/G32 KV、D256、单 query GPU attention 使用融合算子 |
 | `fused_quantized_sdpa_prefill` | `False` | 多 query attention 保留原有实现；开启时还需 `fused_quantized_sdpa=True` |
 | `tuned_bf16_sdpa` | `False` | 默认关闭调优 BF16 decode SDPA |
 
-上表是模型未显式配置时的默认值。`spark-mlx-convert` 默认会在转换产物的
-`config.json` 中写入 `w8_qmv_backend="w8a8"`，加载时优先采用该配置，
-因此默认转换产物的 W8 层使用 W8A8。加载此配置需要支持 W8A8 的
-`spark-mlx-ext` 和 M5 或更新的 Apple Silicon；其他环境可在转换时指定
-`--w8-backend native`。完整转换参数与精度说明见[模型转换](zh/conversion.md)。
-
-**W8/W4 backend 参数选择对应量化层的实现，不改变量化位宽。**
-在 Spark-X2.6-1.7B-INT4-MLX 中，W8 out_proj/head 使用 W8A16，W4 QKV/FFN
-仍然使用 W4A16。embedding 与 gate 等浮点参数保持原精度。
-
-`w8_qmv_backend` 的其他取值：
-
-- `native`：W8 层使用原生 MLX affine 算术。
-- `auto`：按 checkpoint 的 activation metadata 选择；支持 W8A8 的环境中，
-  带相应 metadata 的 out_proj 使用 W8A8，其他投影保持原生。
-- `w8a8`：W8 out_proj/head 使用扩展 W8A8，GPU prefill 和 decode 都包含
-  per-token 激活量化。因此这个名字中的 QMV 不代表它只影响单行输入。
+W8 已移除 Python `w8_qmv_backend`、CLI `--w8-qmv-backend` 及转换命令的
+`--w8-backend` 参数。主模型保持已验证的 native 算术；草稿为 INT8 权重、
+BF16 激活，按实际设备能力选择单行内核和 NAX/matrix 多行内核。
+旧 checkpoint 的路径偏好兼容读取并忽略；显式 model_config 手动覆盖会报错。
+转换产物只记录量化存储格式，不再固定某台机器的 W8 路径，也不默认引入 A8 激活量化。
+W4 后端仍可单独设置，不改变量化位宽。实际选择保存在结果加载元数据中。
 
 `w4_qmv_backend="splitk"` 仅覆盖生产代码列出的 BF16/G32、单行 GPU 形状。
 当前为 4B 的 QKV `[6144,2560]` 和 FFN down `[2560,10240]`，不覆盖 1.7B。
@@ -61,11 +50,11 @@ W8A16 输出路径，其他合适 affine 投影选择 compiled affine 路径。
 
 ## 默认生成配置
 
-这些参数属于 `generation.py` 的 `GenerationConfig`，由
-`spark-mlx-generate`、`spark_mlx_llm.generate` / `stream_generate` 和
+这些参数属于 `config.py` 的 `GenerationConfig`，由
+`spark-mlx generate`、`spark_mlx_llm.generate(..., stream=True/False)` 和
 benchmark/profiler 共用。
 
-`spark-mlx-generate` 的 `--config` JSON 文件也可以设置这些 KV/prefill 字段，
+`spark-mlx generate` 的 `--config` JSON 文件也可以设置这些 KV/prefill 字段，
 显式命令行参数优先于文件配置。Python 调用通过 `config.kv_kwargs()` 导出这些字段，
 与采样和模板参数分别传递。
 
@@ -91,7 +80,7 @@ benchmark/profiler 共用。
 默认命令无需逐项指定优化参数：
 
 ```sh
-.venv/bin/spark-mlx-generate \
+.venv/bin/spark-mlx generate \
   --model /path/to/Spark-X2.6-1.7B-INT4-MLX \
   --prompt '你好' --max-tokens 256
 ```
@@ -111,14 +100,14 @@ text = generate(model, tokenizer, prompt, max_tokens=256)
 ```
 
 算子默认值可由 checkpoint 同名字段或显式 `model_config` 覆盖；
-`load(..., w8_qmv_backend=..., w4_qmv_backend=...)` 的显式参数优先于
+`load(..., w4_qmv_backend=...)` 的显式参数优先于
 `model_config`。CLI 未传算子选项时保留 checkpoint 的显式设置。
 生成参数直接传给生成函数或 CLI：
 
 ```sh
 # 原生 W8 + 关闭融合 decode + 浮点 KV
-.venv/bin/spark-mlx-generate --model /path/to/checkpoint \
-  --w8-qmv-backend native --no-fused-quantized-sdpa --kv-bits none
+.venv/bin/spark-mlx generate --model /path/to/checkpoint \
+  --no-fused-quantized-sdpa --kv-bits none
 ```
 
 CLI 支持三个 SDPA 参数的正反开关，例如 `--fused-quantized-sdpa-prefill` /
@@ -128,15 +117,14 @@ CLI 支持三个 SDPA 参数的正反开关，例如 `--fused-quantized-sdpa-pre
 
 ## 本次迁移与实验依据
 
-- `qmv_backend` / `--qmv-backend` 改名为 `w8_qmv_backend` /
-  `--w8-qmv-backend`；更新调用参数与自己的配置文件。旧配置字段会明确报错，
-  避免被当作未知 metadata 忽略后意外使用新默认值。历史实验快照保留原名。
+- W8 计算路径改为内部自动选择，旧 `qmv_backend` / `w8_qmv_backend`
+  不再作为用户加载选项。历史实验快照保持原字节，不重写为当前接口结果。
 - 删除 `qmv_source`。优化 W8 参数统一来自当前加载的 affine checkpoint：
   INT8 codes 精确解包，scale 转为 FP32，保留原有精度。
-- 默认 W8 改为 `w8a16`，默认开启融合 INT8 decode。
+- 主模型 W8 保持 native；草稿多行按设备选择 NAX/matrix。
 - 没有 W8 out_proj/head 的浮点或纯 W4 checkpoint 保持原层结构，不做 W8 适配。
   有 W8 投影时要求相应扩展 API 和兼容的对称 per-channel metadata；
-  不兼容时应显式选择 `native` 或 `auto`。
+  不支持的格式或设备保留原生回退。
 
 推荐来自本机既有 1.7B 实验，偏重单请求 decode。历史 4K W8A16 约
 176.1 token/s，新 W8A8 head 在另一会话约 173.2 token/s；尚无新同场配对结论。

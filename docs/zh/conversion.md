@@ -2,7 +2,7 @@
 
 [项目首页](../../README.zh.md) · [English](../en/conversion.md)
 
-`spark-mlx-convert` 将本地 Spark BF16 或 compressed-tensors INT4 checkpoint
+`spark-mlx convert` 将本地 Spark BF16 或 compressed-tensors INT4 checkpoint
 转换为 MLX 格式，也支持 Spark 主模型 GGUF。转换在 CPU 上分块执行，无需加载模型进行推理；
 Safetensors 转换仅依赖 NumPy，GGUF 解码使用 `gguf` 包。
 
@@ -33,7 +33,7 @@ Python 加载参数 `model_cache_dir` 或环境变量 `SPARK_MLX_MODEL_CACHE` �
 检查配置与张量元数据，不写入输出：
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B-INT4 \
     --inspect
 ```
@@ -43,7 +43,7 @@ Python 加载参数 `model_cache_dir` 或环境变量 `SPARK_MLX_MODEL_CACHE` �
 使用默认混合精度方案转换已压缩的 INT4 模型：
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B-INT4 \
     --output /path/to/Spark-X2.6-4B-MLX
 ```
@@ -51,7 +51,7 @@ Python 加载参数 `model_cache_dir` 或环境变量 `SPARK_MLX_MODEL_CACHE` �
 使用相同方案量化 BF16 模型：
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B \
     --output /path/to/Spark-X2.6-4B-from-BF16-MLX
 ```
@@ -59,7 +59,7 @@ Python 加载参数 `model_cache_dir` 或环境变量 `SPARK_MLX_MODEL_CACHE` �
 如需保留主模型的 BF16 权重，对 BF16 输入使用 `--quantization none`：
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B \
     --output /path/to/Spark-X2.6-4B-BF16-MLX \
     --quantization none
@@ -73,7 +73,7 @@ Python 加载参数 `model_cache_dir` 或环境变量 `SPARK_MLX_MODEL_CACHE` �
 
 推理入口默认对原始 compressed-tensors INT4 在内存中按块重排
 整数编码并构造 MLX affine 参数，不生成转换缓存或临时模型文件。
-Python 的 `load(path)` 和 `load_pair(path)` 对 INT4 目录也默认使用此模式。
+Python 的 `load(path)` 对 INT4 目录也默认使用此模式。
 转换校验、scale/zero point 舍入和 tied BF16 输出头处理与磁盘转换一致；
 每次启动都会重新准备，并需要临时内存。缓存目录选项与环境变量在此模式下不使用。
 普通 chat/server 仅支持单进程；主模型 GGUF 暂不支持不落盘加载。
@@ -82,7 +82,7 @@ Python 的 `load(path)` 和 `load_pair(path)` 对 INT4 目录也默认使用此�
 ### 主模型 GGUF
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B-Q4_K_M.gguf \
     --output /path/to/Spark-X2.6-4B-from-GGUF-MLX
 ```
@@ -100,7 +100,7 @@ GGUF 路径会重新量化，不能声称保留原 GGUF 的整数码或与 llama
 ### 合并独立的主模型与 draft
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B-INT4 \
     --draft-source /path/to/Spark-X2.6-4B-DSpark.gguf \
     --output /path/to/Spark-X2.6-4B-DSpark-MLX
@@ -116,7 +116,7 @@ GGUF 的 BF16/FP32 精度保留，Q/K/V 自动拼接，共享 embedding 记录�
 `--inspect` 同样支持检查独立 draft；输出必须与两侧源文件分离。
 
 无需导出合并目录时，生成或 DSpark HTTP 服务可通过 `--draft-model` 分别加载；
-Python 使用 `load_pair(target_path, draft_path=draft_path)`，示例见
+Python 使用 `load(target_path, draft_model=draft_path)`，示例见
 [生成与聊天](../../README.zh.md#2-生成与聊天)及 [HTTP 服务](../../README.zh.md#3-启动-http-服务)。
 
 转换器保留 draft 已有精度。浮点 draft 默认在加载阶段量化为 INT8；
@@ -157,31 +157,21 @@ BF16 输入使用逐组或逐通道的 min/max 和 round-to-nearest 量化，无
 如果源模型共享 embedding 与 `lm_head`，混合量化会创建独立的 INT8 `lm_head`，
 embedding 保持 BF16。`--quantization none` 仅支持 BF16 输入，不会对 INT4 checkpoint 反量化。
 
-## 4. W8 执行后端
+## 4. W8 自动路由
 
-`--w8-backend` 指定记录在 `config.json` 和 `conversion_manifest.json` 中的推理策略，
-作用于混合量化下的 W8 `out_proj` 与 `lm_head`，不改变其保存的权重编码或 scale。
+转换器不再接受 `--w8-backend`，Python 转换函数也不再接受 `w8_backend`。
+转换产物保存权重位宽、整数编码及 scale 等模型数据，不记录某台设备的路径偏好，
+也不默认生成 A8 激活量化配置。旧产物中的 W8 路径字段兼容读取并忽略。
 
-| 取值 | 行为 |
-| --- | --- |
-| `w8a8`（默认） | 在受支持的 Metal 路径上按 token 动态量化为 INT8 激活；需要兼容的 `spark-mlx-ext`、Apple M5 或更新芯片，以及 macOS >= 26.2 |
-| `w8a16` | 使用浮点激活；对满足条件的单行 GPU 输入启用优化的逐通道 W8A16 路径 |
-| `native` | 使用浮点激活与 MLX 原生 affine 算子 |
-
-优化后端不可用时，回退到使用浮点激活的 MLX affine 算子。
-W8A8 与浮点激活路径的数值结果可能不同，所有转换操作仍在 CPU 上执行。
-
-显式选择原生路径：
+运行时主模型使用已验证的 native W8 路径；INT8 草稿保持 BF16 激活，单行使用
+专用 W8A16 内核，多行在 M5+ 使用 NAX、兼容旧 GPU 使用 matrix。不支持的形状
+和设备保留回退，实际选择写入生成结果的加载元数据。所有转换操作仍在 CPU 执行。
 
 ```sh
-.venv/bin/spark-mlx-convert \
+.venv/bin/spark-mlx convert \
     --source /path/to/Spark-X2.6-4B-INT4 \
-    --output /path/to/Spark-X2.6-4B-native-MLX \
-    --w8-backend native
+    --output /path/to/Spark-X2.6-4B-MLX
 ```
-
-输出设置 `quantize_activations=false`，用于关闭 MLX LM 的通用 QQLinear 路径。
-选用且可用时，本项目的 W8A8 后端会单独执行激活量化。
 
 ## 5. Python API 与参数
 
@@ -193,7 +183,6 @@ W8A8 与浮点激活路径的数值结果可能不同，所有转换操作仍在
 | `--output` | `output` | 转换时必填，与源目录互不包含的新目录 |
 | `--inspect` | `inspect_only` | `False`，仅检查元数据，不写入输出或扫描完整权重 |
 | `--quantization` | `quantization` | `"mixed"`；`"none"` 保留主模型 BF16 权重，要求 BF16 输入 |
-| `--w8-backend` | `w8_backend` | `"w8a8"`，也可选择 `"w8a16"` 或 `"native"` |
 | `--chunk-rows` | `chunk_rows` | `256`，每次在 CPU 上处理的行数，必须为正整数 |
 
 ```python
@@ -203,7 +192,6 @@ report = convert_to_mlx(
     source="/path/to/Spark-X2.6-4B-INT4",
     output="/path/to/Spark-X2.6-4B-python-MLX",
     quantization="mixed",
-    w8_backend="native",
     chunk_rows=256,
 )
 print(report["quantized_module_counts"])
@@ -223,7 +211,7 @@ print(report["quantized_module_counts"])
 `python -m spark_mlx_llm.conversion` 仍可作为兼容入口。
 请使用 `--source` 和 `--output`；本转换器不支持上游的 `--hf-path`、`--mlx-path`
 或 `--q-bits` 参数。可直接运行的脚本见
-[Python 模型转换示例](examples.md#1-python-模型转换)。
+[Python 模型转换示例](../../example/python_convert.py)。
 
 ## 6. 输出与推理
 
@@ -235,11 +223,11 @@ tokenizer 文件和 `conversion_manifest.json`。若存在 draft 张量，
 运行转换后的主模型：
 
 ```sh
-.venv/bin/spark-mlx-generate \
+.venv/bin/spark-mlx generate \
     --model /path/to/Spark-X2.6-4B-MLX \
     --prompt '你好，请介绍一下自己。' \
     --max-tokens 256 \
-    --no-thinking
+    --no-enable-thinking
 ```
 
 KV 精度在生成阶段单独控制。所有生成入口默认不量化 KV cache，

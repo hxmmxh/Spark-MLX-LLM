@@ -373,8 +373,9 @@ class RuntimeDraftW8Linear(DerivedDraftPerChannelW8Linear):
     """Deployable W8 with a quantized fallback and no retained source module.
 
     FP32 Metal calls with 1..8 rows use direct INT8 reads and FP32 reduction,
-    without expanding the weight matrix. BF16 calls retain the existing W8
-    kernels. Other devices, shapes or unavailable extensions compute from the
+    without expanding the weight matrix. BF16 calls use the single-row W8
+    primitive and select NAX on capable GPUs or the portable matrix multirow
+    kernel otherwise. Other devices, shapes or unavailable extensions compute from the
     same quantized weights in floating point; no source BF16 matrix is kept.
     """
 
@@ -412,12 +413,17 @@ class RuntimeDraftW8Linear(DerivedDraftPerChannelW8Linear):
             "_fallback",
             _QuantizedPerChannelReadout(self.weight, self.scales, self.get("bias")),
         )
-        # Exact module type checks in optimized sampling/context paths also
-        # consult this capability flag before invoking extension kernels.
+        # Sampling uses the single-row primitive and context updates use the
+        # multirow primitive. Neither requires NAX on older Apple GPUs.
         enabled = False
         if mx.default_device() == mx.gpu and mx.metal.is_available():
             ext = get_extension()
-            enabled = bool(getattr(ext, "is_w8a8_available", lambda: False)())
+            enabled = all(
+                callable(getattr(ext, name, None))
+                for name in ("w8a16_per_channel", "w8a16_multirow")
+            )
+            if enabled and not getattr(ext, "is_w8a8_available", lambda: False)():
+                self._variant = "matrix"
         object.__setattr__(self, "_native_kernels", enabled)
         self.freeze()
 

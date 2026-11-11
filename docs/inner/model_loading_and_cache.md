@@ -21,7 +21,7 @@
 
 **CLI `--model-cache-dir` / Python `model_cache_dir` ＞ 环境变量 `SPARK_MLX_MODEL_CACHE` ＞ 默认目录。**
 
-Python 的 `load()` 和 `load_pair()` 使用相同规则；对 INT4 目录默认关闭缓存，
+Python 的 `load()` 使用相同规则；对 INT4 目录默认关闭缓存，
 传入 `model_cache=True` 可启用。关闭缓存时忽略缓存目录设置。
 内存准备保留原始 INT4/INT8 整数编码，按转换规则处理 scale/zero point，
 不生成转换后的模型或临时模型文件，也无需将整个模型展开为 BF16；临时数组仍会占用额外内存。
@@ -36,9 +36,9 @@ Python 的 `load()` 和 `load_pair()` 使用相同规则；对 INT4 目录默认
 该过程会重新量化，不能视为保留原 GGUF 整数编码，也不保证与 llama.cpp 的结果逐位一致。
 词表、BPE 规则与聊天模板从 GGUF 中导入，无需单独下载分词器。
 
-## W8 执行后端
+## W8 自动路由
 
-原始 INT4 主模型的自动格式适配使用 `native` W8 路径；显式运行转换器时，默认记录
-`--w8-backend w8a8`，也可传入 `--w8-backend native` 选择浮点激活的 MLX affine 路径。
-W8A8 不可用时回退到 MLX affine 算子。W8 权重编码保持不变，浮点与 INT8 激活路径的数值结果可能不同。
+原始 INT4 的内存准备和显式转换均不再记录可手动选择的 W8 路径。
+主模型保持 native，草稿保持 INT8 权重/BF16 激活，并按实际GPU能力选择
+NAX或matrix多行内核；不支持时保留回退。旧checkpoint中的路径字段被忽略。
 转换选项与精度细节见[模型转换文档](../zh/conversion.md)。

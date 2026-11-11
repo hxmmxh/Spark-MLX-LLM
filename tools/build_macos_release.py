@@ -29,15 +29,8 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = Path(__file__).with_name("macos_release")
-COMMANDS = {
-    "spark-mlx-generate": "spark_mlx_llm.commands.generate",
-    "spark-mlx-chat": "spark_mlx_llm.commands.chat",
-    "spark-mlx-convert": "spark_mlx_llm.commands.convert",
-    "spark-mlx-server": "spark_mlx_llm.commands.server",
-    "spark-mlx-dspark": "spark_mlx_llm.dspark.cli",
-    "spark-mlx-dspark-server": "spark_mlx_llm.commands.dspark_server",
-    "spark-mlx-doctor": None,
-}
+COMMANDS = {"spark-mlx": "spark_mlx_llm.cli"}
+
 DOCUMENTATION_URL = "https://github.com/XHToken/Spark-MLX-LLM/blob/main"
 
 
@@ -188,6 +181,7 @@ def snapshot_source(destination):
         guide = destination / "release-assets/docs" / language / "release-package.md"
         guide.parent.mkdir(parents=True)
         shutil.copy2(ROOT / "docs" / language / "release-package.md", guide)
+    shutil.copy2(ROOT / "docs/inference.md", destination / "release-assets/docs/inference.md")
     return {
         path.relative_to(destination).as_posix(): sha256(path)
         for path in sorted(destination.rglob("*"))
@@ -268,7 +262,7 @@ def write_launchers(bundle, assets):
 
 def write_release_guides(bundle, assets):
     """Keep both user guides offline and link other project docs to the repository."""
-    guides = {f"docs/{language}/release-package.md" for language in ("en", "zh")}
+    guides = {"docs/inference.md", *(f"docs/{language}/release-package.md" for language in ("en", "zh"))}
     for relative in sorted(guides):
         source = assets / relative
         target = bundle / relative
@@ -382,19 +376,18 @@ def verify_release(bundle, *, gpu, model=None):
     report = {}
     with tempfile.TemporaryDirectory(prefix="spark-release-check-") as cwd:
         for name in COMMANDS:
-            if name != "spark-mlx-doctor":
-                run([bundle / "bin" / name, "--help"], cwd=cwd, env=env, capture=True)
+            run([bundle / "bin" / name, "--help"], cwd=cwd, env=env, capture=True)
         for disabled in (False, True):
             selected = dict(env)
             if disabled:
                 selected["SPARK_MLX_DISABLE_EXT"] = "1"
             command = [
-                bundle / "bin/spark-mlx-doctor",
+                bundle / "bin/spark-mlx", "doctor",
                 "--json",
                 *(["--gpu"] if gpu else []),
             ]
             if model:
-                command.extend(["--model", str(Path(model).resolve())])
+                command.extend(["--model", str(Path(model).resolve()), "--max-tokens", "16"])
             key = "native_fallback" if disabled else "automatic"
             report[key] = json.loads(run(command, cwd=cwd, env=selected, capture=True))
         if report["native_fallback"]["extension"]["available"]:

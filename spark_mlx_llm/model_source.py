@@ -114,7 +114,7 @@ def prepare_model_source(path, *, cache_dir=None):
             file=sys.stderr,
             flush=True,
         )
-        conversion.convert_to_mlx(path, output, w8_backend="native")
+        conversion.convert_to_mlx(path, output)
     return output
 
 

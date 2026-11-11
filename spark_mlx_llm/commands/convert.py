@@ -33,12 +33,6 @@ def main(argv=None, *, prog=None):
         help="mixed: W4/G32 + per-channel W8; none: retain BF16 target",
     )
     parser.add_argument(
-        "--w8-backend",
-        choices=("w8a8", "w8a16", "native"),
-        default="w8a8",
-        help="Preferred W8 backend; unavailable optimized backends use MLX affine operators",
-    )
-    parser.add_argument(
         "--inspect", action="store_true", help="Validate metadata; write nothing"
     )
     parser.add_argument(
@@ -51,7 +45,6 @@ def main(argv=None, *, prog=None):
             args.output,
             draft_source=args.draft_source,
             quantization=args.quantization,
-            w8_backend=args.w8_backend,
             inspect_only=args.inspect,
             chunk_rows=args.chunk_rows,
         )

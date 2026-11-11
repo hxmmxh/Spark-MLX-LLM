@@ -416,13 +416,6 @@ def publish(partial, output):
         raise OSError(error, os.strerror(error), str(output))
 
 
-ACTIVATIONS = {
-    "num_bits": 8,
-    "type": "int",
-    "symmetric": True,
-    "strategy": "token",
-    "dynamic": True,
-}
 W4_SUFFIXES = ("self_attn.q_k_v_proj", "mlp.gate_proj", "mlp.up_proj", "mlp.down_proj")
 DRAFT_TODO = (
     "Draft tensors preserve their stored precision, including versioned MLX INT8/INT4. "
@@ -724,9 +717,10 @@ def _validate_mlx_target(config, tensors):
     )
 
 
-def _mlx_config(config, modules, *, w8_backend="native", preserved_mlx=False):
+def _mlx_config(config, modules, *, preserved_mlx=False):
     """Share storage and execution metadata between disk and memory preparation."""
     effective = copy.deepcopy(config)
+    effective.pop("w8_qmv_backend", None)
     storage = {"bits": 4, "group_size": 32, "mode": "affine"}
     storage.update(
         {
@@ -735,9 +729,6 @@ def _mlx_config(config, modules, *, w8_backend="native", preserved_mlx=False):
         }
     )
     execution = copy.deepcopy(storage)
-    for module, scheme in modules.items():
-        if scheme["bits"] == 8 and w8_backend == "w8a8":
-            execution[module]["input_activations"] = copy.deepcopy(ACTIVATIONS)
     if not preserved_mlx:
         for key in (
             "auto_map",
@@ -753,7 +744,6 @@ def _mlx_config(config, modules, *, w8_backend="native", preserved_mlx=False):
         effective.update(
             quantization=storage,
             quantization_config=execution,
-            w8_qmv_backend=w8_backend,
         )
     return effective
 
@@ -764,7 +754,6 @@ def convert_to_mlx(
     *,
     draft_source: str | Path | None = None,
     quantization: Literal["mixed", "none"] = "mixed",
-    w8_backend: Literal["w8a8", "w8a16", "native"] = "w8a8",
     inspect_only: bool = False,
     chunk_rows: int = 256,
 ) -> dict[str, Any]:
@@ -795,15 +784,6 @@ def convert_to_mlx(
             integer codes when present. A tied lm_head is quantized separately
             from the BF16 embedding. ``"none"`` retains BF16 target weights and
             requires a BF16 source. Defaults to ``"mixed"``.
-        w8_backend: Inference policy written into the output configuration for
-            W8 layers. ``"w8a8"`` dynamically quantizes activations per token;
-            the optimized path requires the W8A8 Metal extension and M5+.
-            ``"w8a16"`` uses the optimized floating-activation backend, while
-            ``"native"`` uses MLX affine operators without the W8A8 extension.
-            Unavailable optimized backends fall back to MLX affine operators
-            with floating-point activations. This policy does not change CPU
-            conversion execution and is only applied when ``quantization="mixed"``.
-            Defaults to ``"w8a8"``.
         inspect_only: Whether to validate the configuration and tensor layout
             without writing output. Inspection does not scan all weight values
             or compute coefficient rounding errors. Defaults to False.
@@ -840,7 +820,6 @@ def convert_to_mlx(
         f"Expected a model directory or a Spark target .gguf: {source}",
     )
     require(quantization in ("mixed", "none"), "Expected quantization=mixed or none")
-    require(w8_backend in ("w8a8", "w8a16", "native"), "Invalid W8 backend")
     require(type(chunk_rows) is int and chunk_rows > 0, "chunk_rows must be positive")
     require(inspect_only or output is not None, "--output is required unless --inspect")
     if output is not None:
@@ -948,9 +927,7 @@ def convert_to_mlx(
         and ("tokenizer.json" in assets or "tokenizer.model" in assets),
         "Missing tokenizer files",
     )
-    effective = _mlx_config(
-        effective, modules, w8_backend=w8_backend, preserved_mlx=preserved_mlx
-    )
+    effective = _mlx_config(effective, modules, preserved_mlx=preserved_mlx)
     result = {
         "status": "inspected" if inspect_only else "complete",
         "source": str(source),
@@ -963,11 +940,7 @@ def convert_to_mlx(
         if compressed
         else "bf16",
         "quantization": "preserved" if preserved_mlx else quantization,
-        "w8_backend": effective.get("w8_qmv_backend")
-        if preserved_mlx
-        else w8_backend
-        if modules
-        else None,
+        "w8_backend": "automatic" if modules or preserved_mlx else None,
         "quantized_module_counts": {
             str(b): sum(s["bits"] == b for s in modules.values()) for b in (4, 8)
         },

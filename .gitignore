@@ -224,3 +224,6 @@ experiments
 tests
 benchmark
 spark_mlx_llm/dspark
+
+# Public inference conformance is part of the supported API.
+tests

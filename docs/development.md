@@ -84,7 +84,7 @@ and generated `.build/`/`.results/` records are excluded by the existing ignore 
 
 ```sh
 MODEL_PATH=/path/to/model ./run.sh --prompt '你好' --max-tokens 128
-./run.sh --model /path/to/model --device gpu --dtype bfloat16 --temp 0 --seed 1
+./run.sh --model /path/to/model --device gpu --dtype bfloat16 --temperature 0 --seed 1
 ```
 
 `MODEL_PATH` supplies the model default; `--model` overrides it. `SPARK_PYTHON`
@@ -151,10 +151,10 @@ spark_mlx_llm/ops/       Configuration, dispatch and implementations grouped by 
 spark_mlx_llm/loader.py  Local and Hugging Face checkpoint loading
 spark_mlx_llm/generation.py Unified GenerationConfig and generation APIs
 spark_mlx_llm/commands/  Independent command-line entry points
-  generate.py           spark-mlx-generate: prompt, model loading and text generation
-  chat.py               spark-mlx-chat: model registration and terminal chat loop
-  server.py             spark-mlx-server: shared settings and MLX LM HTTP service
-  convert.py            spark-mlx-convert: conversion arguments and report output
+  generate.py           spark-mlx generate: prompt, model loading and text generation
+  chat.py               spark-mlx chat: model registration and terminal chat loop
+  server.py             spark-mlx server: shared settings and MLX LM HTTP service
+  convert.py            spark-mlx convert: conversion arguments and report output
 spark_mlx_llm/conversion.py BF16/INT4 conversion Python API
 extensions/spark-mlx-ext/ Optional C++ extension package
 tests/                   CPU/GPU unit and real-checkpoint tests

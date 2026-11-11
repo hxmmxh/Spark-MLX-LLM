@@ -19,7 +19,7 @@ Spark-MLX-LLM 是面向 **Spark 2.6 和 Spark 2.5** 的本地推理项目，基�
 ## 项目特色
 
 - **官方模型直接加载**：支持 Spark-X2.6-4B-INT4 和 Spark-X2.6-1.7B-INT4，无需提前转换。
-- **混合精度适配**：保留官方模型已有的 INT4、INT8、BF16 权重方案，支持配置 W8 执行后端。
+- **混合精度适配**：保留官方模型已有的 INT4、INT8、BF16 权重方案。
 - **DSpark 推测解码**：支持分别加载主模型与配套草稿，或加载合并模型，并独立配置两侧采样参数。
 - **Apple Silicon 优化**：提供专用 QKV/RoPE、线性层和 INT8 KV 注意力算子，按配置、设备与输入形状选择执行路径。
 - **多种使用方式**：提供命令行生成与聊天、Python 普通与流式生成 API，以及 HTTP 服务。
@@ -75,163 +75,62 @@ DSpark 草稿只需下载对应的 BF16 GGUF 文件。
 
 ### 2. 生成与聊天
 
-支持直接加载 **compressed-tensors INT4 Safetensors 主模型**和 **BF16 GGUF 格式的 DSpark 草稿**，
-无需提前转换为 MLX 模型。
-
-未显式指定参数时，命令行生成与聊天使用以下默认配置：
-
-| 配置 | 默认值与行为 |
-| --- | --- |
-| 思考模式 | 开启，强度为 `low` |
-| 主模型温度 `temperature` | `0`，使用贪心采样，每步选择概率最高的 token |
-| 主模型 `top_p` | `1`，不进行累计概率截断 |
-| 主模型 `top_k` | `0`，不限制候选 token 数 |
-| DSpark 草稿采样 | 温度、`top_p`、`top_k` 逐项继承主模型；默认同样使用贪心采样 |
-| DSpark 草稿精度 | 浮点草稿加载时量化为 INT8；已有 INT8/INT4 草稿按保存格式加载 |
-| 输出长度上限 | `512` tokens，包含思考与最终回答 |
-
-温度大于 `0` 时，按 `top_p`、`top_k` 筛选后的概率分布随机采样。
-示例命令中的显式参数会覆盖默认值。
-
-以下以 4B 为例，请将 `/path/to/...` 替换为本地路径；使用 1.7B 时，同时替换主模型与草稿路径。
-
-**DSpark 生成（推荐）：**
+普通解码和 dSpark 共用 `load()`、`generate()` 及 `spark-mlx` 命令。
+Python 和生成/聊天 CLI 使用 `GenerationConfig`，
+完整约定见[推理接口说明](docs/inference.md)。
+默认值已内置在代码中，无需配置文件；只有需要 JSON 覆盖时才传 `--config FILE`。
 
 ```sh
-.venv/bin/python -m spark_mlx_llm.dspark generate \
-    --model /path/to/Spark-X2.6-4B-INT4 \
-    --draft-model /path/to/Spark-X2.6-4B-DSpark.gguf \
-    --prompt '请用一段话解释推测解码。' \
-    --temperature 1 --top-p 0.95 --top-k 0 \
-    --draft-temperature 1 --draft-top-p 1 --draft-top-k 0 \
-    --max-draft-tokens 3 --max-new-tokens 512 --stats
+.venv/bin/spark-mlx generate --model /path/to/TARGET --draft-model /path/to/DRAFT --prompt '请介绍推测解码。' --json
+.venv/bin/spark-mlx chat --model /path/to/TARGET --draft-model /path/to/DRAFT --stream
 ```
 
-主模型通过 `--model` 指定，配套草稿通过 `--draft-model` 指定。
-主模型也支持已转换的 MLX 目录，草稿也支持已导出的 MLX Safetensors 目录。
-上例采用随机采样：主模型温度为 `1`、`top_p=0.95`，草稿温度为 `1`、`top_p=1`，两侧均不限制 `top_k`。
-
-**DSpark 交互式聊天：**
-
-```sh
-.venv/bin/spark-mlx-chat \
-    --model /path/to/Spark-X2.6-4B-INT4 \
-    --draft-model /path/to/Spark-X2.6-4B-DSpark.gguf
-```
-
-该命令同时加载主模型与配套草稿，使用 DSpark 进行多轮对话。
-
-DSpark 生成、聊天和 HTTP 服务默认每轮最多生成 3 个草稿 token；
-检查点预测槽位不足 3 个时使用其实际可用槽位数。
-
-`--max-tokens` 包含思考与最终回答的总长度，可按需调大。
-其他思考模式见[思考模式说明](docs/zh/examples.md#思考模式)。
-
-<details>
-<summary>Python 生成示例</summary>
+普通检查点省略 `--draft-model`；合并检查点自动识别草稿，`--no-use-draft` 只加载主模型。
+统一默认值：主模型温度 1 / top-p 0.95，草稿温度 1 / top-p 1，seed 0，
+输出上限 512，每轮最多 3 个草稿 token，low 思考，两项异步均开启。
 
 ```python
-from spark_mlx_llm.dspark import SamplingOptions, generate, load_pair
+from spark_mlx_llm import GenerationConfig, load, generate
 
-pair = load_pair(
-    "/path/to/Spark-X2.6-4B-INT4",
-    draft_path="/path/to/Spark-X2.6-4B-DSpark.gguf",
-)
-result = generate(
-    pair,
-    "请解释推测解码。",
-    max_new_tokens=512,
-    max_draft_tokens=3,
-    sampling=SamplingOptions(temperature=1.0, top_p=0.95),
-    draft_sampling=SamplingOptions(temperature=0.0),
-)
+model, tokenizer = load("/path/to/TARGET", draft_model="/path/to/DRAFT")
+config = GenerationConfig()
+result = generate(model, tokenizer, "请介绍推测解码。", config=config)
 print(result.text)
-print(result.draft_acceptance_rate, result.mean_acceptance_length)
+for chunk in generate(model, tokenizer, "请介绍推测解码。", config=config, stream=True):
+    print(chunk.text, end="", flush=True)
 ```
-
-普通生成与流式生成 API 见[接口使用说明](docs/zh/examples.md)。
-
-</details>
-
-<details>
-<summary>更多选项：采样参数与草稿精度</summary>
-
-#### 采样与生成参数
-
-DSpark `generate` 的常用参数如下，完整参数可运行
-`.venv/bin/python -m spark_mlx_llm.dspark generate --help` 查看。
-
-| 参数 | 作用 |
-| --- | --- |
-| `--mode baseline` | 仅运行主模型，便于与 DSpark 对比 |
-| `--temperature` / `--top-p` / `--top-k` | 主模型采样；默认温度为 `0`，使用贪心采样 |
-| `--draft-temperature` / `--draft-top-p` / `--draft-top-k` | 草稿采样；未指定的字段逐项继承主模型设置 |
-| `--max-draft-tokens N` | 限制每轮候选数，默认最多 `3`；`0` 禁用草稿生成 |
-| `--max-new-tokens N` | 限制生成长度；普通生成入口对应参数为 `--max-tokens` |
-| `--stats` / `--json` | 将统计写入 stderr / 以 JSON 返回文本和指标 |
-| `--raw-prompt` | 跳过默认应用的聊天模板 |
-
-#### 草稿精度选项
-
-浮点草稿默认在加载时量化为 INT8，已有 INT8/INT4 草稿直接按文件中的格式恢复。
-如需保留浮点精度或改用 INT4，可通过 `--draft-quantization` 显式选择。
-
-| `--draft-quantization` | 行为 |
-| --- | --- |
-| 不指定（默认） | 浮点草稿量化为 INT8；本项目已量化的 MLX 草稿按原格式恢复 |
-| `checkpoint` | 保留文件记录的精度，直接加载浮点或本项目已量化的 MLX 草稿 |
-| `bf16` | 保留浮点草稿权重；已有量化草稿需使用 `checkpoint` 或相同量化方案 |
-| `int8` | 主要线性投影使用对称、逐输出通道 INT8，scale 为 FP32 |
-| `int4` | QKV、FFN gate/up/down 使用非对称 INT4/G32，其余主要投影使用 INT8 |
-
-| 草稿模块 | `int8` | `int4` |
-| --- | --- | --- |
-| Attention QKV、FFN gate/up/down | 对称 per-channel INT8，FP32 scale | 非对称 INT4/G32，BF16 scale/offset |
-| 特征融合 `fc`、attention `out_proj`、Markov 输出投影 | 对称 per-channel INT8，FP32 scale | 对称 per-channel INT8，FP32 scale |
-| 独立草稿 `lm_head`（如存在） | 对称 per-channel INT8 | 对称 per-channel INT8 |
-| Token/Markov embedding、attention gate、归一化、置信度头 | 保留浮点 | 保留浮点 |
-| 共享主模型输出头 | 沿用所选 readout 策略 | 沿用所选 readout 策略 |
-
-量化不改写主模型或源文件，接受/拒绝校正使用量化后草稿的实际提议概率。
-专用 W8 内核不可用时，使用量化权重的浮点计算回退，不保留原 BF16 线性层副本。
-Python 的 `load_pair()` 使用相同默认值，通过 `pair.draft_quantization` 查看实际量化模块。
-这些规则也适用于合并目录中的浮点草稿。
-
-</details>
 
 ### 3. 启动 HTTP 服务
 
-**DSpark 服务（推荐）：** 直接传入主模型目录与配套草稿文件。
+#### 启动服务
+
+下面列出 4B 主模型及配套草稿的建议参数。替换两个模型路径后运行，并保持当前终端开启：
 
 ```sh
-.venv/bin/spark-mlx-server \
+.venv/bin/spark-mlx server \
     --model /path/to/Spark-X2.6-4B-INT4 \
     --draft-model /path/to/Spark-X2.6-4B-DSpark.gguf \
     --served-model-name spark-x2.6-4b \
     --host 127.0.0.1 --port 8080 \
-    --thinking --reasoning-effort low \
+    --enable-thinking --reasoning-effort low \
     --draft-quantization int8 \
-    --temperature 1 --top-p 0.95 --top-k 0 \
+    --temperature 1 --top-p 0.95 --top-k 0 --min-p 0 \
     --draft-temperature 1 --draft-top-p 1 --draft-top-k 0 \
+    --max-draft-tokens 3 \
+    --asynchronous-draft --async-context --compile-draft-chain \
+    --seed 0 --prefill-step-size 512 \
     --max-context-length 262144 \
     --max-tokens 262144
 ```
 
-当前 DSpark 服务一次处理一个请求。
+使用 1.7B 时，同时替换主模型、草稿路径及服务模型名。普通解码省略草稿相关参数。
+关闭思考时，将 `--enable-thinking` 替换为 `--no-enable-thinking`。
+`--max-context-length` 限制输入与输出的总 token 数；`--max-tokens` 只限制输出，
+包含思考和最终回答。请求未指定采样参数时，使用上述服务配置。
 
-**主模型服务：**
+#### 测试 HTTP 请求
 
-```sh
-.venv/bin/spark-mlx-server \
-    --model /path/to/Spark-X2.6-4B-INT4 \
-    --served-model-name spark-x2.6-4b \
-    --host 127.0.0.1 --port 8080 \
-    --thinking --reasoning-effort low \
-    --temperature 0 --top-p 1 --top-k 0 \
-    --max-tokens 262144
-```
-
-启动其中一种服务并保持终端运行，在另一个终端发送聊天请求：
+在另一个终端发送请求，`model` 与启动时的 `--served-model-name` 保持一致：
 
 ```sh
 curl --fail-with-body http://127.0.0.1:8080/v1/chat/completions \
@@ -243,10 +142,14 @@ curl --fail-with-body http://127.0.0.1:8080/v1/chat/completions \
     }'
 ```
 
-请求中的 `model` 与启动时的 `--served-model-name` 保持一致，这里均为 `spark-x2.6-4b`。
-请求未指定 `max_tokens` 时继承服务配置，也可按请求显式设置，但需满足上下文限制。
-将 `stream` 改为 `true`，并为 curl 添加 `-N`，即可逐段接收 SSE 响应。使用 Ctrl-C 停止服务。
-HTTP 文本续写和完整参数见[接口使用说明](docs/zh/examples.md)。
+流式测试时，为 curl 添加 `-N`，并将 `"stream"` 改为 `true`。
+
+也可以在项目根目录运行提供的测试脚本：
+
+```sh
+.venv/bin/python example/http_chat.py
+.venv/bin/python example/http_completions.py
+```
 
 ## 量化与兼容性说明
 
@@ -266,12 +169,10 @@ HTTP 文本续写和完整参数见[接口使用说明](docs/zh/examples.md)。
 | `model.embedding` | 保留 BF16，不量化 | — | — |
 | RMSNorm | 保留 BF16，不量化 | 不量化 | — |
 
-所有生成入口默认保留模型精度，不量化 KV cache：**BF16 模型使用 BF16 KV**。
-如需对全局注意力层启用 INT8/G32 KV，
-可向 `spark-mlx-generate` 显式传入 `--kv-bits 8`，或向本包 Python 生成函数传入
-`kv_bits=8`。generate 与 Python 包装默认按 512 tokens 分块处理输入，chat/server
-保留上游 MLX LM 的分块行为。这些设置与权重量化分别控制，详见
-[KV 缓存与输入分块](docs/zh/examples.md#kv-缓存与输入分块)。
+KV 默认保留模型精度。Python/生成 CLI 默认输入分块为 512 tokens；
+HTTP 保留原有的 2048-token 默认值，可显式覆盖。
+普通解码可通过 `GenerationConfig(kv_bits=8)` 或 `--kv-bits 8` 启用量化 KV，
+详见[统一推理接口](docs/inference.md)。
 
 ## 文档导航
 

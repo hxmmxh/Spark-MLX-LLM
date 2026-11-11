@@ -8,7 +8,7 @@
 | --- | --- |
 | 草稿 INT8 权重、FP32 输入 | `RuntimeDraftW8Linear` 在 Metal GPU 上、输入为 1–8 行且描述符匹配时调用扩展的 `w8a32_per_channel`。直接读取 INT8 权重，进行 FP32 累加并应用每通道 FP32 scale，避免先生成完整的 FP32 权重矩阵。旧扩展、CPU 和不支持的描述符继续使用原投影路径。 |
 | 草稿上下文 K/V | 上下文只消费 K/V，不消费 Q。符合条件的投影只计算 K/V 对应的权重行。新增的 FP32 路径支持运行时每通道 INT8 投影；Metal 上的 1–8 行可调用融合算子，其余形状使用切片后的 FP32 矩阵乘法。原有 BF16 路径保持各自的支持范围；其他量化格式和自定义模块保留完整 QKV 调用。 |
-| 主模型 W4 验证 | `load_pair` 默认选择 `w4_qmv_backend="multirow"`。只有八行输入、BF16 激活和系数、W4/G32 及受支持矩阵形状才使用已有的 `wide` 算子。其他情况（包括缺少兼容扩展）使用原生 MLX 路径。 |
+| 主模型 W4 验证 | `load` 默认选择 `w4_qmv_backend="multirow"`。只有八行输入、BF16 激活和系数、W4/G32 及受支持矩阵形状才使用已有的 `wide` 算子。其他情况（包括缺少兼容扩展）使用原生 MLX 路径。 |
 
 W4 支持的 `(输出维度, 输入维度)` 为 `(6144, 2560)`、`(10240, 2560)`、`(2560, 10240)`。`multirow` 直接使用原有打包权重；它不同于需要额外派生权重缓冲的 `multirow_packed`，后者没有自动启用。
 
@@ -16,27 +16,29 @@ W4 支持的 `(输出维度, 输入维度)` 为 `(6144, 2560)`、`(10240, 2560)`
 
 ## 配置优先级
 
-dSpark 的目标模型配置依次采用加载器默认值、检查点配置和显式 `model_config`，后者优先。已有 W8 策略保持不变：dSpark 加载器的默认值仍为 `native`，检查点及调用者可覆盖它。普通模型加载的全局默认值不受此更改影响。
+dSpark 的目标模型配置依次采用加载器默认值、检查点配置和显式 `model_config`，后者优先。已有 W8 策略保持不变：dSpark 加载器的默认值仍为 `native`，检查点及调用者可覆盖它。普通模型和 dSpark 共用此加载策略。
 
 Python 调用者可以显式关闭 W4 多行选择，或保留已有的 W8 设置：
 
 ```python
-from spark_mlx_llm.dspark.loader import load_pair
+from spark_mlx_llm import load
 
-pair = load_pair(
+model, tokenizer = load(
     "/path/to/target",
-    draft_path="/path/to/draft",
+    draft_model="/path/to/draft",
     model_config={"w4_qmv_backend": "native"},
 )
 ```
 
-未提供 W4 覆盖值时，正常 dSpark CLI 和服务器加载入口使用上述 W4 默认值。HTTP 服务器也可通过 `--w4-qmv-backend native` 显式关闭多行选择；其现有 `--w8-qmv-backend native` 默认不变。若需检查完全不依赖扩展的行为，可以在启动 Python 前设置 `SPARK_MLX_DISABLE_EXT=1`；这会关闭整个可选扩展，而不只是某一项优化。
+未提供 W4 覆盖值时，正常 dSpark CLI 和服务器加载入口使用上述 W4 默认值。HTTP 服务器也可通过 `--w4-qmv-backend native` 显式关闭多行选择；主模型 W8 自动保持 native，草稿路由按设备选择。若需检查完全不依赖扩展的行为，可以在启动 Python 前设置 `SPARK_MLX_DISABLE_EXT=1`；这会关闭整个可选扩展，而不只是某一项优化。
 
 ## 草稿长度与数值行为
 
-Python `generate` / `stream_generate` 可传入 `max_new_tokens=None`，取消输出 token 数上限并等待自然 EOS；未传该参数时仍使用原来的 512-token 默认上限。
-
-默认每轮最多生成 3 个草稿 token；检查点预测槽位不足 3 个时使用实际可用槽位数。此默认值统一用于 Python `generate` / `stream_generate`、CLI、聊天和 HTTP 服务，Python 中不传 `max_draft_tokens` 或传 `None` 均使用该默认值。CLI / 服务可用 `--max-draft-tokens N`，Python 可用 `max_draft_tokens=N` 显式覆盖；`0` 禁用草稿生成。当前 Spark 4B 仍有 7 个训练预测槽位，可显式指定 `7` 使用全部槽位。
+所有入口使用 [`GenerationConfig`](inference.md)。`max_tokens=None` 等待自然 EOS，
+默认上限 512。`max_draft_tokens` 默认 3，实际不超过检查点槽位数；0 禁用草稿。
+Python 使用 `generate(model, tokenizer, prompt, config=GenerationConfig(...))`，
+流式仅增加 `stream=True`。CLI 使用 `--max-tokens` 与 `--max-draft-tokens`。
+两项异步默认均开启，实际生效条件和请求值同时记录在结果中。
 
 该选项限制采样的草稿数量，不改变检查点的预测布局，也不会把整个草稿骨干网络缩短为三行。默认三枚草稿对应至多四行主模型验证，因而不会命中仅支持八行的 W4 `wide` 路径，使用原生 MLX 验证；显式选择七枚草稿且其余条件满足时才可能命中八行路径。长度 3 和长度 7 的收益应在同一输入与采样配置下实测。
 

@@ -18,7 +18,7 @@ from .target import SparkTarget
 @dataclass(frozen=True)
 class ModelPair:
     target: SparkTarget
-    drafter: DSparkDrafter
+    drafter: DSparkDrafter | None
     tokenizer: object
     config: dict
     generation_config: dict
@@ -68,15 +68,17 @@ def _target_model_config(checkpoint_config, model_config=None):
     W8 retains this loader's existing policy; ordinary model defaults are
     unaffected. Unsupported W4 descriptors fall back in operator dispatch.
     """
+    from ..ops.linear import automatic_w8_backend
+
     return {
         "w4_qmv_backend": "multirow",
-        "w8_qmv_backend": "native",
         **checkpoint_config,
         **(model_config or {}),
+        "w8_qmv_backend": automatic_w8_backend(),
     }
 
 
-def load_pair(
+def _load_pair(
     path,
     *,
     draft_path=None,

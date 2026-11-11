@@ -14,20 +14,20 @@ PAYLOAD = {
         {"role": "system", "content": "请使用中文简洁回答。"},
         {"role": "user", "content": "请用一句话介绍你自己。"},
     ],
-    "max_tokens": 2048,
-    "temperature": 0.0,
+    "max_tokens": 512,
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "seed": 0,
     "stream": False,  # 改成 True 即可逐段读取 SSE 响应。
-    "chat_template_kwargs": {
-        "enable_thinking": False,  # 改成 True 开启思考。
-        "reasoning_effort": "low",  # 开启思考时使用 low 或 high。
-    },
+    "enable_thinking": True,
+    "reasoning_effort": "low",
 }
 # 多轮对话：在 messages 中补入历史 user/assistant 消息。
-# 若需继承服务端思考配置，删除 chat_template_kwargs 字段。
+# 若需继承服务端思考配置，删除 enable_thinking / reasoning_effort 字段。
 
 
 def print_stream(response):
-    # 当前 MLX LM 服务每个事件发送一行 data: JSON，空行分隔事件。
+    # 服务每个事件发送一行 data: JSON，空行分隔事件。
     for line in response:
         if not line.startswith(b"data:"):
             continue

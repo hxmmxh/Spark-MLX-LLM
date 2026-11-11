@@ -14,7 +14,7 @@ DSpark 先由草稿模型提出多个候选 token，再由主模型验证并提�
 | --- | --- | --- |
 | `config.py` | 解析、校验草稿几何、Spark 执行约定和层结构 | `DSparkConfig.from_dict/from_spark_dict`、`spark_layer_specs` |
 | `checkpoint.py` | 检查权重文件头、索引、名称与形状 | `inspect_checkpoint` |
-| `loader.py` | 加载权重与分词器，组装主模型和草稿模型，绑定共享输出头 | `load_pair`、`ModelPair` |
+| `loader.py` | 加载权重与分词器，组装主模型和草稿模型，绑定共享输出头 | `_load_pair`、`ModelPair` |
 | `drafter.py` | 实现草稿网络、特征融合、Markov 与置信度计算、上下文投影 | `DSparkDrafter` |
 | `draft_ops.py` | 草稿 FFN 融合、线性层补齐、Markov 缓存和上下文 K/V-only 投影 | `install_draft_linear_padding`、`install_markov_bias_cache`、`install_draft_context_kv` |
 | `draft_quantization.py` | 从已加载权重派生可选 W8 草稿后端，支持安装与恢复 | `install_derived_draft_w8` |
@@ -24,11 +24,11 @@ DSpark 先由草稿模型提出多个候选 token，再由主模型验证并提�
 | `draft_policy.py` | 在验证前，根据置信度和预算确定提交长度 | `prefix_survival_probabilities`、`verification_length` |
 | `acceptance.py` | 根据验证结果判定实际接受前缀，产生修正或额外 token | `greedy_accept`、`sampled_accept`、`AcceptanceResult` |
 | `tokenization.py` | 编码提示词、应用聊天模板、校验输入 ID、统一解析 EOS 配置 | `encode_prompt`、`eos_token_ids` |
-| `generation.py` | 调度 prefill、草稿和验证，处理 EOS、长度限制、缓存提交与流式事件，记录计数和耗时 | `generate`、`stream_generate`、`TokenEvent` |
+| `generation.py` | 调度 prefill、草稿和验证，处理 EOS、长度限制、缓存提交与流式事件，记录计数和耗时 | `_collect`、`_generate_events`、`TokenEvent` |
 | `metrics.py` | 定义生成结果、统计口径、按草稿长度分组的计数及序列化 | `GenerationResult`、`DraftLengthStats` |
-| `benchmark.py` | 配对测量 baseline 与 DSpark，比较输出并汇总性能 | 基准测试函数 |
-| `cli.py` | 统一解析检查、生成和基准测试命令，调用功能并展示结果；运行时依赖按需导入 | `main` |
-| `__main__.py` | 调用统一 CLI 入口 | `python -m spark_mlx_llm.dspark` |
+| `../benchmark/__init__.py` | 通过公共 generate 测量，保存每次结果 | 基准测试函数 |
+| `../cli.py` | 统一解析检查、生成和基准测试命令，调用功能并展示结果；运行时依赖按需导入 | `main` |
+| `../__main__.py` | 调用统一 CLI 入口 | `python -m spark_mlx_llm` |
 | `__init__.py` | 汇总公开接口，延迟导入运行时依赖 | 包级导出 |
 
 `drafter.py` 明确表示草稿网络；主模型的网络实现位于父目录的
@@ -159,9 +159,9 @@ token，再用“两个 token 是否相同”决定接受。拒绝修正的目�
 
 | 参数 | 当前默认值 | 作用 |
 | --- | --- | --- |
-| `temperature` | `0.0` | 零表示贪心；正值表示按概率采样。正温度下，在截断前，较低温度使分布更集中，较高温度使分布更平缓 |
+| `temperature` | `1.0` | 零表示贪心；正值表示按概率采样。正温度下，在截断前，较低温度使分布更集中，较高温度使分布更平缓 |
 | `top_k` | `0` | 概率采样时按最高 k 个 logits 的阈值筛选；零表示不启用 |
-| `top_p` | `1.0` | 概率采样时保留累计概率达到阈值的高概率前缀，再归一化；1 表示不启用 |
+| `top_p` | `0.95` | 概率采样时保留累计概率达到阈值的高概率前缀，再归一化；1 表示不启用 |
 | `seed` | `0` | 控制概率抽样及接受判定使用的随机数 |
 
 概率路径的处理顺序是：logits 转为 FP32、除以 temperature、应用 top-k、softmax、
@@ -169,10 +169,10 @@ token，再用“两个 token 是否相同”决定接受。拒绝修正的目�
 确定的 token；`temperature>0` 本身不意味着每次输出一定不同。
 
 主模型和草稿分别使用 `SamplingOptions`。CLI 的 `--draft-temperature`、
-`--draft-top-p`、`--draft-top-k` 单独控制草稿；每个未指定的参数继承对应主模型设置。
+`--draft-top-p`、`--draft-top-k` 单独控制草稿；默认草稿温度 1、top-p 1、top-k 0，全部由 GenerationConfig 定义。
 例如，主模型 `--temperature 1 --top-p 0.95` 搭配 `--draft-temperature 0`，即可使用
 “草稿贪心、主模型概率采样”。运行时保留贪心草稿的 one-hot 提议分布，供概率接受和
-拒绝修正使用。Python 中分别传入 `sampling` 与 `draft_sampling`。
+拒绝修正使用。Python 中统一传入 `GenerationConfig`。
 
 `confidence_threshold` 则控制提交验证的草稿长度：它使用置信度头的预测，
 不是这里 `min(1, p/q)` 的接受概率。
@@ -181,25 +181,24 @@ token，再用“两个 token 是否相同”决定接受。拒绝修正的目�
 
 ```sh
 # 贪心生成，使用整块验证
-.venv/bin/python -m spark_mlx_llm.dspark generate \
+.venv/bin/python -m spark_mlx_llm generate \
   --model /path/to/checkpoint \
   --prompt "请介绍一下推测解码。" \
-  --max-new-tokens 64 --temperature 0 \
-  --greedy-verification batched --stats
+  --max-tokens 64 --temperature 0 \
+  --stats
 
 # 概率生成，验证路径自动使用 batched
-.venv/bin/python -m spark_mlx_llm.dspark generate \
+.venv/bin/python -m spark_mlx_llm generate \
   --model /path/to/checkpoint \
   --prompt "请写一个简短的故事。" \
-  --max-new-tokens 64 --temperature 0.8 \
+  --max-tokens 64 --temperature 0.8 \
   --top-p 0.95 --top-k 40 --seed 0 --stats
 ```
 
-将 `generate` 换成 `benchmark` 即可做基线与推测生成的配对测量。概率模式的
-`greedy_match` 为 `null`，因为它不检查与 baseline 的逐 token 一致性。
-Python 调用示例和统计指标见 [DSpark 使用说明](../spark_mlx_llm/dspark/README.md)。
+将 `generate` 换成 `benchmark` 可重复测量同一配置；使用 `--max-draft-tokens 0`
+可测普通解码，分开保存并核对实际配置。完整调用与统计见[统一推理接口](inference.md)。
 
-## 与 sequential / batched 的关系
+## 内部正确性测试中的 sequential / batched
 
 这两组名称控制不同的事情：
 
@@ -211,7 +210,7 @@ Python 调用示例和统计指标见 [DSpark 使用说明](../spark_mlx_llm/dsp
 | greedy + sequential | 支持；仅在逐 token 正确性测试时显式指定 |
 | greedy + batched | 支持，也是默认设置；用于评估整块验证的加速效果 |
 | probabilistic + batched | 当前概率生成使用的路径 |
-| probabilistic + sequential | 未实现；即使传入 `--greedy-verification sequential`，正温度下仍走 batched |
+| probabilistic + sequential | 未实现；内部正确性测试选择 sequential 时，正温度下仍走 batched |
 
 `batched` 在这里表示一次处理多个候选 token，运行时仍是单请求。
 接受率或速度不能仅凭采样方式判断，还取决于模型、提示词、采样参数和草稿长度；

@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spark-mlx-llm"
-version = "0.1.1"
+version = "0.1.2"
 description = "Spark2_5 inference support for MLX LM"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 dependencies = [
     "gguf>=0.17.0",
-    "mlx-lm>=0.31.3,<0.32",
+    "mlx-lm==0.31.3",
 ]
 
 [project.optional-dependencies]
@@ -20,10 +20,7 @@ cuda12 = ["mlx[cuda12]>=0.32.1"]
 cuda13 = ["mlx[cuda13]>=0.32.1"]
 
 [project.scripts]
-spark-mlx-generate = "spark_mlx_llm.commands.generate:main"
-spark-mlx-convert = "spark_mlx_llm.commands.convert:main"
-spark-mlx-chat = "spark_mlx_llm.commands.chat:main"
-spark-mlx-server = "spark_mlx_llm.commands.server:main"
+spark-mlx = "spark_mlx_llm.cli:main"
 
 [tool.uv.sources]
 spark-mlx-ext = { path = "extensions/spark-mlx-ext", editable = true }

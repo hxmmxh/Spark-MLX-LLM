@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .conversion import convert_to_mlx
-    from .generation import GenerationConfig, generate, stream_generate
+    from .generation import GenerationConfig, GenerationChunk, GenerationResult, generate
     from .loader import load
     from .model import Model, ModelArgs
 
@@ -15,7 +15,8 @@ __all__ = [
     "convert_to_mlx",
     "generate",
     "load",
-    "stream_generate",
+    "GenerationChunk",
+    "GenerationResult",
 ]
 
 
@@ -32,10 +33,10 @@ def __getattr__(name):
         from .model import Model, ModelArgs
 
         globals().update(Model=Model, ModelArgs=ModelArgs)
-    elif name in {"generate", "stream_generate"}:
-        from .generation import generate, stream_generate
+    elif name in {"generate", "GenerationChunk", "GenerationResult"}:
+        from .generation import GenerationChunk, GenerationResult, generate
 
-        globals().update(generate=generate, stream_generate=stream_generate)
+        globals().update(generate=generate, GenerationChunk=GenerationChunk, GenerationResult=GenerationResult)
     elif name == "load":
         from .loader import load
 

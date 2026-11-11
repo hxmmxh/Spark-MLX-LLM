@@ -368,10 +368,10 @@ flowchart TD
 | --- | --- | --- |
 | Decoder 结构 | RMSNorm → 门控 attention → 残差 → RMSNorm → GELU 门控 MLP → 残差 | [`model.py`](../spark_mlx_llm/model.py) 的 `Attention`、`MLP`、`TransformerBlock` 对应此结构 |
 | Full / sliding attention | 按层类型使用不同可见范围 | `Spark2_5Model` 选择对应 mask，`make_cache()` 分别建立 `KVCache` / `RotatingKVCache` |
-| 默认 compressed-tensors 转换 | 原始 `out_proj` / `lm_head` 为 W8A8 | [`conversion.py`](../spark_mlx_llm/conversion.py) 默认写入 W8A8 执行配置；QKV/MLP/out_proj 的 affine 系数为 BF16，`lm_head` 系数保留 FP32。`--w8-backend native` 可选择浮点激活的 MLX affine 路径 |
-| 显式开启 `out_proj` W8A8 | Prefill 与 decode 均逐 token 动态量化 | `w8_qmv_backend="w8a8"` 使用 `ops.linear.W8A8Projection`，加载时要求扩展及设备支持；CPU 执行使用 affine 回退 |
+| 默认 compressed-tensors 转换 | 原始 out_proj / lm_head 为 W8A8 | 转换后保留W4/W8权重存储，QKV/MLP/out_proj的affine系数为BF16、lm_head系数保留FP32；运行时主模型自动选择native，不再写入手动路径偏好 |
+| out_proj W8A8 算子 | Prefill与decode均逐token动态量化 | W8A8保留为数值/算子诊断实现，不再通过公共加载参数启用 |
 | `out_proj` 的原始 FP32 scale | 按原始 scale 计算 | W8A8 适配器从已加载 affine 参数提取 scale 并转为 FP32；若转换时已舍入为 BF16，转回 FP32 不能恢复原始精度 |
-| `lm_head` W8A8 | 本文按原始方案表示 | 独立 W8 `lm_head` 与 `out_proj` 使用相同的 `w8_qmv_backend` 策略，默认转换后接入 W8A8 适配器 |
+| lm_head W8A8 | 本文按原始方案表示 | 当前主模型实际使用自动native路径，本文原始方案不代表默认执行路径 |
 | 输入 / 输出 embedding | BF16 embedding + 独立 INT8 `lm_head` | 此配置不能直接使用同一份存储共享权重；以具体 checkpoint 的 `tie_word_embeddings` 为准，不套用 README 中其他规格模型的 tied-embedding 描述 |
 | Attention 优化 | 不改变逻辑顺序 | Native QKV + RoPE、调优 BF16 SDPA 保留各自的单 token 条件；INT8-cache SDPA 另有多 token tile 内核，见下文 |
 

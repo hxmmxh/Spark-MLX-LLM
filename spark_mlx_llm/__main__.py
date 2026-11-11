@@ -1,5 +1,4 @@
-"""Run the DSpark command-line interface."""
-
+"""Run the unified Spark command line."""
 from .cli import main
 
 if __name__ == "__main__":

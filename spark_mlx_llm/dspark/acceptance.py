@@ -40,7 +40,8 @@ def greedy_accept(
 
 
 def sampled_accept(
-    draft_tokens, draft_probs, target_logits, options, *, compact_target=False
+    draft_tokens, draft_probs, target_logits, options, *, compact_target=False,
+    target_probs=None,
 ) -> AcceptanceResult:
     """Accept a sampled prefix and emit a residual correction or target bonus.
 
@@ -52,6 +53,17 @@ def sampled_accept(
     It preserves the ordinary sorting/tie policy and explicit random state.
     """
     import mlx.core as mx
+
+    if target_probs is not None:
+        from .sampling import SamplingOptions
+
+        # External target policies already applied temperature and filtering.
+        # Reuse rejection/residual sampling with an identity policy over log p.
+        if target_probs.shape != target_logits.shape:
+            raise ValueError("Target probability shape differs from verified logits")
+        target_logits = mx.log(target_probs)
+        options = SamplingOptions(temperature=1.0)
+        compact_target = False
 
     if isinstance(draft_tokens, mx.array):
         if draft_tokens.ndim != 1 or not mx.issubdtype(draft_tokens.dtype, mx.integer):
