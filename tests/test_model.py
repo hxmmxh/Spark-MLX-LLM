@@ -1,7 +1,7 @@
 import mlx.core as mx
 from mlx.utils import tree_flatten
 
-from spark_mlx_llm.model import Model, ModelArgs
+from spark_mlx_llm.spark2_5 import Model, ModelArgs
 
 
 def make_args(**overrides):

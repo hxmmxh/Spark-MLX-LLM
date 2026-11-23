@@ -3,9 +3,9 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from spark_mlx_llm import mlx_tools
-from spark_mlx_llm import model as spark_model
-from spark_mlx_llm.registration import MODEL_MODULE, register_model
+from spark_mlx_llm import mlx_tools, spark3
+from spark_mlx_llm import spark2_5 as spark_model
+from spark_mlx_llm.registration import MODEL_MODULE, SPARK3_MODEL_MODULE, register_model
 
 
 def test_register_model_exposes_spark2_5():
@@ -27,6 +27,19 @@ def test_register_model_prefers_native_mlx_lm_module(monkeypatch):
     monkeypatch.setitem(sys.modules, MODEL_MODULE, native_module)
 
     assert register_model() is native_module
+
+
+def test_register_model_also_exposes_spark3(monkeypatch):
+    monkeypatch.delitem(sys.modules, SPARK3_MODEL_MODULE, raising=False)
+    register_model()
+    assert sys.modules[SPARK3_MODEL_MODULE] is spark3
+
+
+def test_register_model_preserves_native_spark3(monkeypatch):
+    native = ModuleType(SPARK3_MODEL_MODULE)
+    monkeypatch.setitem(sys.modules, SPARK3_MODEL_MODULE, native)
+    register_model()
+    assert sys.modules[SPARK3_MODEL_MODULE] is native
 
 
 @pytest.mark.parametrize(

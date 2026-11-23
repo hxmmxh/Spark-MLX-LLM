@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "spark-mlx-llm"
 version = "0.1.0"
-description = "Spark2_5 inference support for MLX LM"
+description = "Spark2_5 and Spark3 inference support for MLX LM"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
@@ -14,6 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+vision = ["Pillow>=10"]
 cpu = ["mlx[cpu]>=0.32.1"]
 cuda12 = ["mlx[cuda12]>=0.32.1"]
 cuda13 = ["mlx[cuda13]>=0.32.1"]
@@ -31,7 +32,7 @@ include = ["spark_mlx_llm*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "integration: requires the full Spark2_5 checkpoint",
+    "integration: requires a real Spark checkpoint selected by environment variable",
 ]
 
 [tool.ruff]
