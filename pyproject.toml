@@ -4,27 +4,29 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spark-mlx-llm"
-version = "0.1.0"
+version = "0.1.2"
 description = "Spark2_5 and Spark3 inference support for MLX LM"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 dependencies = [
-    "mlx-lm>=0.31.3,<0.32",
+    "gguf>=0.17.0",
+    "mlx-lm==0.31.3",
 ]
 
 [project.optional-dependencies]
 vision = ["Pillow>=10"]
 cpu = ["mlx[cpu]>=0.32.1"]
+test = ["pytest>=8", "ruff>=0.12"]
+metal = ["spark-mlx-ext==0.2.0; sys_platform == 'darwin' and platform_machine == 'arm64' and python_version >= '3.11'"]
 cuda12 = ["mlx[cuda12]>=0.32.1"]
 cuda13 = ["mlx[cuda13]>=0.32.1"]
-test = ["pytest>=8", "ruff>=0.12"]
 
 [project.scripts]
-spark-mlx-generate = "spark_mlx_llm.cli:main"
-spark-mlx-convert = "spark_mlx_llm.mlx_tools:convert_main"
-spark-mlx-chat = "spark_mlx_llm.mlx_tools:chat_main"
-spark-mlx-server = "spark_mlx_llm.mlx_tools:server_main"
+spark-mlx = "spark_mlx_llm.cli:main"
+
+[tool.uv.sources]
+spark-mlx-ext = { path = "extensions/spark-mlx-ext", editable = true }
 
 [tool.setuptools.packages.find]
 include = ["spark_mlx_llm*"]

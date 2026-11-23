@@ -8,7 +8,7 @@ import pytest
 from mlx import nn
 from mlx_lm.utils import load_model, quantize_model
 
-from spark_mlx_llm import loader
+from spark_mlx_llm import _target_loader as loader
 from spark_mlx_llm.spark2_5 import Model as Spark2_5Model
 from spark_mlx_llm.spark3 import Model, ModelArgs
 

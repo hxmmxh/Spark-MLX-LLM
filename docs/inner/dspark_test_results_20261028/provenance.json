@@ -1,0 +1,325 @@
+{
+  "snapshot_at": "2026-10-28T10:05:56.932080+08:00",
+  "active_run": {
+    "output_dir": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542",
+    "pid": 97210,
+    "started_at": "2026-10-27T21:07:52.722851+08:00",
+    "draft_attention_policy": "all_swa",
+    "dspark_block_size": 7,
+    "target_top_p": 0.95,
+    "draft_top_p": 1.0,
+    "previous_run": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-all-swa-4096-think-high-temp1-20261027_172807"
+  },
+  "effective_config": {
+    "verified_at": "2026-10-27T21:07:55.360941+08:00",
+    "draft_config": {
+      "model_type": "spark2_5",
+      "hidden_size": 2560,
+      "intermediate_size": 10240,
+      "vocab_size": 131072,
+      "num_attention_heads": 16,
+      "num_key_value_heads": 4,
+      "head_dim": 256,
+      "num_target_layers": 36,
+      "num_draft_layers": 5,
+      "block_size": 7,
+      "mask_token_id": 2,
+      "target_layer_ids": [
+        2,
+        10,
+        18,
+        25,
+        33
+      ],
+      "draft_vocab_size": 131072,
+      "markov_rank": 256,
+      "markov_head_type": "vanilla",
+      "enable_confidence_head": true,
+      "confidence_head_with_markov": true,
+      "fc_norm": true,
+      "rms_norm_eps": 1e-06,
+      "attention_bias": false,
+      "mlp_bias": false,
+      "hidden_act": "gelu",
+      "headwise_attn_output_gate": true,
+      "gate_attn_act_mode": "sigmoid",
+      "dspark_tie_word_embeddings": false,
+      "logits_start": 0
+    },
+    "draft_layer_specs": [
+      {
+        "rope_theta": 10000,
+        "rope_dims": 256,
+        "block_attention": "bidirectional",
+        "sliding_window": 512,
+        "rope_traditional": false
+      },
+      {
+        "rope_theta": 10000,
+        "rope_dims": 256,
+        "block_attention": "bidirectional",
+        "sliding_window": 512,
+        "rope_traditional": false
+      },
+      {
+        "rope_theta": 10000,
+        "rope_dims": 256,
+        "block_attention": "bidirectional",
+        "sliding_window": 512,
+        "rope_traditional": false
+      },
+      {
+        "rope_theta": 10000,
+        "rope_dims": 256,
+        "block_attention": "bidirectional",
+        "sliding_window": 512,
+        "rope_traditional": false
+      },
+      {
+        "rope_theta": 10000,
+        "rope_dims": 256,
+        "block_attention": "bidirectional",
+        "sliding_window": 512,
+        "rope_traditional": false
+      }
+    ],
+    "target_sampling": {
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 0
+    },
+    "draft_sampling": {
+      "temperature": 1.0,
+      "top_p": 1.0,
+      "top_k": 0
+    },
+    "generation": {
+      "max_tokens": 4096,
+      "prefill_step_size": 512,
+      "kv_bits": null,
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 0
+    },
+    "thinking": {
+      "enabled": true,
+      "reasoning_effort": "high"
+    }
+  },
+  "job_manifest": {
+    "created_at": "2026-10-27T21:05:42.150485+08:00",
+    "cwd": "/Users/xmhuang6/workspace/spark_mlx_llm_my",
+    "argv": [
+      "/Users/xmhuang6/workspace/datasets/dspark_test",
+      "--model",
+      "/Users/xmhuang6/workspace/models/dspark_test_model/OPD_v1024_iter30001",
+      "--dspark",
+      "--max-tokens",
+      "4096",
+      "--temp",
+      "1",
+      "--top-p",
+      "0.95",
+      "--top-k",
+      "0",
+      "--draft-temperature",
+      "1",
+      "--draft-top-p",
+      "1",
+      "--draft-top-k",
+      "0",
+      "--enable-thinking",
+      "--reasoning-effort",
+      "high",
+      "--seed",
+      "0",
+      "--greedy-verification",
+      "batched",
+      "--device",
+      "gpu",
+      "--kv-bits",
+      "none",
+      "--output-dir",
+      "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542"
+    ],
+    "model": "/Users/xmhuang6/workspace/models/dspark_test_model/OPD_v1024_iter30001",
+    "model_config_sha256": "d1c4cf65bbb078f5291879410d257b0979fb9f9b50b94c12c120dea96c3f06cd",
+    "draft_config": {
+      "model_type": "spark2_5",
+      "hidden_size": 2560,
+      "intermediate_size": 10240,
+      "vocab_size": 131072,
+      "num_attention_heads": 16,
+      "num_key_value_heads": 4,
+      "head_dim": 256,
+      "num_target_layers": 36,
+      "num_draft_layers": 5,
+      "block_size": 7,
+      "mask_token_id": 2,
+      "target_layer_ids": [
+        2,
+        10,
+        18,
+        25,
+        33
+      ],
+      "draft_vocab_size": 131072,
+      "markov_rank": 256,
+      "markov_head_type": "vanilla",
+      "enable_confidence_head": true,
+      "confidence_head_with_markov": true,
+      "fc_norm": true,
+      "rms_norm_eps": 1e-06,
+      "attention_bias": false,
+      "mlp_bias": false,
+      "hidden_act": "gelu",
+      "headwise_attn_output_gate": true,
+      "gate_attn_act_mode": "sigmoid",
+      "dspark_tie_word_embeddings": false,
+      "logits_start": 0
+    },
+    "draft_layer_specs": [
+      {
+        "rope_theta": 10000,
+        "rope_dims": 256,
+        "block_attention": "bidirectional",
+        "sliding_window": 512,
+        "rope_traditional": false
+      },
+      {
+        "rope_theta": 10000,
+        "rope_dims": 256,
+        "block_attention": "bidirectional",
+        "sliding_window": 512,
+        "rope_traditional": false
+      },
+      {
+        "rope_theta": 10000,
+        "rope_dims": 256,
+        "block_attention": "bidirectional",
+        "sliding_window": 512,
+        "rope_traditional": false
+      },
+      {
+        "rope_theta": 10000,
+        "rope_dims": 256,
+        "block_attention": "bidirectional",
+        "sliding_window": 512,
+        "rope_traditional": false
+      },
+      {
+        "rope_theta": 10000,
+        "rope_dims": 256,
+        "block_attention": "bidirectional",
+        "sliding_window": 512,
+        "rope_traditional": false
+      }
+    ],
+    "target_sampling": {
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 0
+    },
+    "draft_sampling": {
+      "temperature": 1.0,
+      "top_p": 1.0,
+      "top_k": 0
+    },
+    "baseline_run": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-all-swa-4096-think-high-temp1-20261027_172807",
+    "baseline_completed": 310,
+    "baseline_parameters": {
+      "dspark_block_size": 8,
+      "target_top_p": 1.0,
+      "draft_top_p": 1.0
+    },
+    "comparison_note": "Paired successful records only; combined effects of target top_p and block size; old baseline is incomplete.",
+    "inputs": [
+      {
+        "name": "aime24_format.json",
+        "records": 30,
+        "sha256": "5f159f66f898b433d5913aef35b817b9a496be4cf3643886592cdac0f5141709"
+      },
+      {
+        "name": "aime25_format_30.json",
+        "records": 30,
+        "sha256": "c6e4abd82065d7469e55040bf5895117f9b76ac038ff86075fa8a3f89a56275e"
+      },
+      {
+        "name": "alpaca_format_80.json",
+        "records": 80,
+        "sha256": "354badf2451c9fb7a3431627e75873246250f124585be0142b085b5022b79b24"
+      },
+      {
+        "name": "arena-hard-v2-format-80.json",
+        "records": 79,
+        "sha256": "d47cae0b6f36653f642647f498fb622a4539f96450eb3fc20e3cb11ad96ae062"
+      },
+      {
+        "name": "gsm8k_format_80.json",
+        "records": 80,
+        "sha256": "30aa190e5547711e56d5b26fda1670d4d48ec1c36eb0de6629ae402821e8a7f2"
+      },
+      {
+        "name": "humaneval_format_80.json",
+        "records": 80,
+        "sha256": "6b84bc173d2afd33e036bf82cad870476daedc11e120a5ddf048e9ff143fb28d"
+      },
+      {
+        "name": "lbpp_format_80.json",
+        "records": 80,
+        "sha256": "52d48a2da09ab96a2bb51356d88d079a24ee592423de02d68f7cf13c980ef9f9"
+      },
+      {
+        "name": "livecodebench_format_80.json",
+        "records": 80,
+        "sha256": "19fd1007b7a6d9b2605f4bd2b4c53147dbb99ef9096a20809c6f093e4322d82d"
+      },
+      {
+        "name": "math_format_80.json",
+        "records": 80,
+        "sha256": "c22568cbfb49b92991e435ba27d332c60278fc4b345681ca8299eade8e63d1b0"
+      },
+      {
+        "name": "math_system.jsonl",
+        "records": 300,
+        "sha256": "886f0d515aed2844a8ddb65a144eea363d64753c998330d8943160be0ec7e1b1"
+      },
+      {
+        "name": "mbpp_format_80.json",
+        "records": 80,
+        "sha256": "a8da96bdec7b6025b94585d18ccc63ae6c9d212c36f70039a229c0a5c7b5a2c8"
+      },
+      {
+        "name": "spark_agent_log_format_100.json",
+        "records": 100,
+        "sha256": "2a1a66e2ed653f2775190833180565b89052440d5560b1f62c44866214085036"
+      },
+      {
+        "name": "spark_agent_log_format_300.json",
+        "records": 300,
+        "sha256": "69223aa957dea6bf25d8601b2bf54596e275a98e1bfa037fa43c6f20773a5577"
+      }
+    ],
+    "source_sha256": {
+      "spark_mlx_llm/dspark/__init__.py": "e2dd21a7afa764b09bd4dea23e53e4a4354e7b6cc2ea297b0aca19663bc9951b",
+      "spark_mlx_llm/dspark/__main__.py": "fe611ec37d3c899bc169821fd2638fbf22ca9826181eee1dacb4570f7e83d0a0",
+      "spark_mlx_llm/dspark/acceptance.py": "f703da79f3ef6b508abc714dc3a89f607567380709a6fc926d25fa07dc9c12e3",
+      "spark_mlx_llm/dspark/benchmark.py": "7138c7db9030aa5d8e1e677725c365ee654f68b914a56e5f8a151187f9799f57",
+      "spark_mlx_llm/dspark/cache.py": "ee50c84d804c7fbeb686922acf86af3ef854becb28e62bd8435f52f6b5b8f998",
+      "spark_mlx_llm/dspark/checkpoint.py": "2bd2ced3cbecb09778d6ed9103c08422cbe96d36a067faad7190fa80213bfb53",
+      "spark_mlx_llm/dspark/cli.py": "5a06882ccca92e20bc1661ccc16fe8a546e9ad3f7f7a0a2681228aecc85a6210",
+      "spark_mlx_llm/dspark/config.py": "7ea5929638f2763056f178350735a5521de786f567ea17e2f23b164c9c35dfbb",
+      "spark_mlx_llm/dspark/draft_policy.py": "c3846257b1dd714032b8d99d8c742c5fd47bf8e365136bdfed08f7f44dda76bb",
+      "spark_mlx_llm/dspark/drafter.py": "0b38c8a657e5c3c14188ea3e5a070bcbb34448f1c142a05926e199d5ebc9a777",
+      "spark_mlx_llm/dspark/generation.py": "c66b1d7970449fdfe9150c598ff89df90ff76fe4692271b6392098cd4b3ff414",
+      "spark_mlx_llm/dspark/loader.py": "4553f669ebfd9d6d7438adb7332306b8f2ff23db4e063b4e4e404edbd6b9a2a1",
+      "spark_mlx_llm/dspark/metrics.py": "196d9c5020bb4e8e4db536d61ca850b64a34c9121466ac0d2bbc8f60cf777b8f",
+      "spark_mlx_llm/dspark/sampling.py": "0414537ee6b3a1baad6a656b33d275b4f2a1992341b0bd6dd0503dec1ca586cf",
+      "spark_mlx_llm/dspark/target.py": "7462d66610557d75f674c0d1d49de69da2814a0b95deb1df8a61815848c44a20",
+      "spark_mlx_llm/dspark/tokenization.py": "64cbff382a452e3e470aa4ef9ab1d2f5347475a3229c3673638d2c738b31a79d",
+      "spark_mlx_llm/dspark/tests/run_dataset.py": "ae1b379c5edf5d1c46ddea4ebf3ea25e095bd1967fccbc70634971dd4ce71463"
+    }
+  },
+  "external_results_source": "User-provided screenshot; parameters confirmed identical in conversation",
+  "snapshot_is_live": false
+}

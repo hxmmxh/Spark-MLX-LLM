@@ -1,0 +1,11 @@
+Generated with built-in image_gen.
+Official vLLM Ascend reference: https://github.com/vllm-project/vllm-ascend/blob/main/docs/source/logos/vllm-ascend-logo-text-light.png
+
+Use case: compositing
+Asset type: transparent PNG logo for an open-source project's README header.
+Input image 1 is the edit target and layout reference: the existing Spark + MLX composite logo. Input image 2 is the official vLLM Ascend logo, a supporting branding reference.
+Primary request: produce a similar Spark + vLLM Ascend composite logo. Keep the distinctive purple Spark/星火 symbol from image 1 on the left, preserving its exact recognizable geometry: four large rounded points, four smaller diagonal points, and its central four-point star cutout. Remove the MLX lettering completely. To its right place the vLLM Ascend branding from image 2, with the recognizable yellow-and-blue v mark, charcoal LLM lettering, and the red Ascend symbol with readable Ascend lettering. Preserve the brand shapes and colors faithfully; do not invent a new star.
+Composition: one clean horizontal logo lockup, left Spark emblem and right vLLM Ascend branding, optically centered vertically, balanced spacing and generous but restrained outer padding. Wide canvas approximately 3:1, preferably 2400x800 pixels. All components fully visible and legible.
+Style: crisp flat brand artwork, sharp antialiased edges, restrained purple gradient on the Spark emblem matching the source; no background, no texture, no mockup, no decorative effects.
+Text (verbatim): "vLLM" and "Ascend". The Spark emblem itself represents Spark, so no additional Spark text. No literal plus sign, no underscore, no tagline, no MLX.
+Constraints: genuine transparent alpha background, including holes in symbols and letters; dark charcoal text suitable for light README backgrounds. No checkerboard painted into the image, no white rectangle, no cast shadow, no extra symbols.

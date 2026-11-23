@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+*.gputrace
+experiments
+.results
+tests
+benchmark
+spark_mlx_llm/dspark
+
+# Public inference conformance is part of the supported API.
+tests

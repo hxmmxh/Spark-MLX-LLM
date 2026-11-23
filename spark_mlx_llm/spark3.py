@@ -254,11 +254,12 @@ def _out_proj_uses_w8a8(args: ModelArgs, layer_idx: int) -> bool:
 
 
 def _w8a8_operation():
-    try:
-        from mlx_spark_ext import is_w8a8_available, w8a8_linear
-    except ImportError:
+    from .extension import get_extension
+
+    extension = get_extension()
+    if extension is None or not extension.is_w8a8_available():
         return None
-    return w8a8_linear if is_w8a8_available() else None
+    return extension.w8a8_linear
 
 
 class _W8A8QuantizedLinear(nn.QuantizedLinear):

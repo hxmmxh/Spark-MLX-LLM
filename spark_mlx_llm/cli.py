@@ -1,140 +1,212 @@
+"""One command and configuration contract for all Spark inference."""
+
 import argparse
+import json
+import sys
+from contextlib import closing
 from pathlib import Path
 
-import mlx.core as mx
-from mlx_lm import generate
-from mlx_lm.sample_utils import make_sampler
+from .config import GenerationConfig
+from .requests import resolve_request
 
-from .loader import load
+
+def _model_arguments(parser, *, required=True):
+    from .model_source import add_model_cache_arguments
+
+    parser.add_argument("--model", required=required)
+    parser.add_argument("--draft-model")
+    parser.add_argument("--use-draft", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--draft-quantization", choices=("checkpoint", "bf16", "int8", "int4"))
+    parser.add_argument("--draft-readout", choices=("checkpoint", "embedding"), default="checkpoint")
+    parser.add_argument("--dtype", choices=("bfloat16", "float32"))
+    parser.add_argument("--device", choices=("auto", "cpu", "gpu"), default="auto")
+    parser.add_argument("--w4-qmv-backend")
+    for name in ("fused_quantized_sdpa", "fused_quantized_sdpa_prefill", "tuned_bf16_sdpa", "verification_bf16_sdpa"):
+        parser.add_argument("--" + name.replace("_", "-"), action=argparse.BooleanOptionalAction, default=None)
+    add_model_cache_arguments(parser)
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(
-        description="Generate text with Spark2_5 or Spark3"
-    )
-    parser.add_argument("--model", required=True, help="Local path or HF repo")
-    parser.add_argument("--prompt", "-p", default="你好")
-    parser.add_argument(
-        "--image",
-        action="append",
-        default=[],
-        help="Still-image path; repeat for multiple images",
-    )
-    parser.add_argument(
-        "--tokenizer-path", help="Separate matching tokenizer directory or HF repo"
-    )
-    parser.add_argument("--image-min-pixels", type=int)
-    parser.add_argument("--image-max-pixels", type=int)
-    parser.add_argument("--max-tokens", "-m", type=int, default=128)
-    parser.add_argument("--temp", type=float, default=0.0)
-    parser.add_argument("--top-p", type=float, default=1.0)
-    parser.add_argument("--top-k", type=int, default=0)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument(
-        "--device",
-        choices=("auto", "cpu", "gpu"),
-        default="auto",
-        help="MLX execution device (default: auto)",
-    )
-    parser.add_argument(
-        "--dtype",
-        choices=("checkpoint", "float32", "bfloat16"),
-        default="checkpoint",
-        help="Weight dtype override (default: keep checkpoint dtype)",
-    )
-    parser.add_argument("--ignore-chat-template", action="store_true")
-    parser.add_argument(
-        "--chat-template",
-        help="Path to the checkpoint's training chat template (Jinja)",
-    )
+    parser = argparse.ArgumentParser(prog="spark-mlx", description=__doc__, allow_abbrev=False)
+    commands = parser.add_subparsers(dest="command", required=True)
+    for command in ("generate", "chat", "server", "benchmark"):
+        entry = commands.add_parser(command, allow_abbrev=False)
+        _model_arguments(entry, required=command != "server")
+        GenerationConfig.add_arguments(entry)
+        entry.add_argument("--print-config", action="store_true", help="Validate and print requested settings without loading a model")
+        if command in ("generate", "benchmark"):
+            source = entry.add_mutually_exclusive_group()
+            source.add_argument("--prompt")
+            source.add_argument("--input-file", type=Path)
+            source.add_argument("--request-file", type=Path, help="Replay the same JSON body accepted by HTTP")
+            entry.add_argument("--json", action="store_true")
+            entry.add_argument("--stats", action="store_true")
+            if command == "benchmark":
+                entry.add_argument("--trials", type=int, default=3)
+                entry.add_argument("--warmup-tokens", type=int, default=128)
+        if command in ("generate", "chat"):
+            entry.add_argument("--stream", action=argparse.BooleanOptionalAction, default=False)
+        if command in ("generate", "chat", "benchmark"):
+            entry.add_argument("--tokenizer-path", help="Separate matching tokenizer directory or HF repo")
+            entry.add_argument("--chat-template", type=Path, help="Path to the training chat template (Jinja)")
+            entry.add_argument("--ignore-chat-template", dest="apply_chat_template", action="store_false", default=argparse.SUPPRESS)
+        if command == "generate":
+            entry.add_argument("--image", action="append", default=[], help="Still-image path; repeat for multiple images")
+            entry.add_argument("--image-min-pixels", type=int)
+            entry.add_argument("--image-max-pixels", type=int)
+        if command == "chat":
+            entry.add_argument("--system-prompt")
+        if command == "server":
+            entry.add_argument("--host", default="127.0.0.1")
+            entry.add_argument("--port", type=int, default=8080)
+            entry.add_argument("--served-model-name")
+            entry.add_argument("--allowed-origins", type=lambda value: value.split(","), default=["*"],
+                               help="Comma-separated CORS origins (default: *)")
+    commands.add_parser("convert", add_help=False, help="Convert a checkpoint; use convert --help")
+    doctor = commands.add_parser("doctor")
+    _model_arguments(doctor, required=False)
+    GenerationConfig.add_arguments(doctor)
+    doctor.add_argument("--gpu", action="store_true")
+    doctor.add_argument("--lock-timeout", type=float, default=0)
+    doctor.add_argument("--json", action="store_true")
+    inspect = commands.add_parser("inspect")
+    inspect.add_argument("--model", required=True)
     return parser
 
 
-def main():
-    args = build_parser().parse_args()
-    if args.ignore_chat_template and args.chat_template:
-        raise ValueError(
-            "--chat-template cannot be combined with --ignore-chat-template"
-        )
-    if args.device == "cpu":
-        mx.set_default_device(mx.cpu)
-    elif args.device == "gpu":
-        mx.set_default_device(mx.gpu)
-    mx.random.seed(args.seed)
+def _load(args):
+    import mlx.core as mx
 
-    model, tokenizer = load(
-        args.model,
-        dtype=None if args.dtype == "checkpoint" else args.dtype,
+    from .loader import load
+
+    if args.device != "auto":
+        mx.set_default_device(mx.cpu if args.device == "cpu" else mx.gpu)
+    return load(
+        args.model, draft_model=args.draft_model, use_draft=args.use_draft,
+        draft_quantization=args.draft_quantization, draft_readout=args.draft_readout,
+        dtype=args.dtype, model_cache=args.model_cache, model_cache_dir=args.model_cache_dir,
         tokenizer_path=args.tokenizer_path,
-    )
-    prompt = args.prompt
-    processor = None
-    if args.image:
-        from .processing_spark3 import Spark3Processor
-
-        if model.model_type != "spark3" or model.args.vision_config is None:
-            raise ValueError("--image requires a Spark3 checkpoint with vision_config")
-        from .loader import _resolve_model_path
-
-        processor = Spark3Processor.from_pretrained(
-            _resolve_model_path(args.model, None), tokenizer, model.args
-        )
-        if processor.image_token not in prompt:
-            prompt = (
-                "\n".join([processor.image_placeholder] * len(args.image))
-                + "\n"
-                + prompt
-            )
-    if not args.ignore_chat_template and (
-        args.chat_template or tokenizer.has_chat_template
-    ):
-        template_options = {}
-        if args.chat_template:
-            template_options["chat_template"] = Path(args.chat_template).read_text()
-        prompt = tokenizer.apply_chat_template(
-            [{"role": "user", "content": prompt}],
-            tokenize=False,
-            add_generation_prompt=True,
-            **template_options,
-        )
-
-    sampler = make_sampler(
-        temp=args.temp,
-        top_p=args.top_p,
-        top_k=args.top_k,
-    )
-    generation = {
-        "max_tokens": args.max_tokens,
-        "sampler": sampler,
-        "verbose": True,
-    }
-    if processor is not None:
-        from .multimodal import generate_multimodal
-
-        image_options = {
-            key: value
-            for key, value in (
-                ("min_pixels", args.image_min_pixels),
-                ("max_pixels", args.image_max_pixels),
-            )
-            if value is not None
-        }
-        generate_multimodal(
-            model,
-            processor,
-            prompt,
-            args.image,
-            images_kwargs=image_options,
-            **generation,
-        )
-        return
-    generate(
-        model,
-        tokenizer,
-        prompt=prompt,
-        **generation,
+        w4_qmv_backend=args.w4_qmv_backend,
+        model_config={name: getattr(args, name) for name in
+                      ("fused_quantized_sdpa", "fused_quantized_sdpa_prefill", "tuned_bf16_sdpa", "verification_bf16_sdpa")
+                      if getattr(args, name) is not None},
     )
 
 
-if __name__ == "__main__":
-    main()
+def _request(args, config):
+    if args.request_file is not None:
+        return resolve_request(json.loads(args.request_file.read_text()), config)
+    prompt = args.input_file.read_text() if args.input_file is not None else args.prompt or "你好"
+    return prompt, None, config, getattr(args, "stream", False)
+
+
+def _emit(model, tokenizer, prompt, *, config, tools=None, stream=False, as_json=False, stats=False,
+          images=None, images_kwargs=None):
+    from .generation import generate
+
+    value = generate(model, tokenizer, prompt, config=config, tools=tools, stream=stream,
+                     images=images, images_kwargs=images_kwargs)
+    if not stream:
+        print(json.dumps(value.to_dict(), ensure_ascii=False) if as_json else value.text)
+        result = value
+    else:
+        result = None
+        with closing(value):
+            for chunk in value:
+                if as_json:
+                    print(json.dumps(chunk.to_dict(), ensure_ascii=False), flush=True)
+                elif chunk.text:
+                    print(chunk.text, end="", flush=True)
+                if chunk.result is not None:
+                    result = chunk.result
+        if not as_json:
+            print()
+        if result is None:
+            raise RuntimeError("Generation ended without a result")
+    if stats:
+        print(json.dumps(result.metrics(), ensure_ascii=False), file=sys.stderr)
+    return result
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "convert":
+        from .commands.convert import main as convert
+
+        return convert(argv[1:], prog="spark-mlx convert")
+    parser = build_parser()
+    if argv and argv[0] == "server" and any(flag in argv for flag in ("--help", "-h")):
+        from .server import print_upstream_help
+        print_upstream_help()
+    if argv and argv[0] == "server":
+        args, upstream_options = parser.parse_known_args(argv)
+    else:
+        args = parser.parse_args(argv)
+    if args.command == "inspect":
+        from .dspark.checkpoint import inspect_checkpoint
+
+        print(json.dumps(inspect_checkpoint(args.model).summary(), indent=2))
+        return 0
+    config = GenerationConfig.from_args(parser, args)
+    if getattr(args, "chat_template", None) is not None:
+        if not config.apply_chat_template:
+            parser.error("--chat-template requires chat templates to be enabled")
+        config = config.overlay({
+            "chat_template_kwargs": {"chat_template": args.chat_template.read_text()}
+        })
+    if args.command == "doctor":
+        from .diagnostics import doctor
+        return doctor(parser, args, config)
+    try:
+        if args.command in ("generate", "benchmark"):
+            prompt, tools, config, stream = _request(args, config)
+            if args.command == "benchmark" and stream:
+                raise ValueError("benchmark measures non-streaming generation; request stream must be false")
+            if args.command == "benchmark" and (args.trials <= 0 or args.warmup_tokens < 0):
+                raise ValueError("trials must be positive and warmup_tokens nonnegative")
+        if getattr(args, "print_config", False):
+            print(json.dumps(config.to_dict(), ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "server":
+            from .server import serve_cli
+            return serve_cli(args, config, upstream_options)
+        model, tokenizer = _load(args)
+        if args.command == "generate":
+            image_options = {
+                name: value for name, value in (
+                    ("min_pixels", args.image_min_pixels),
+                    ("max_pixels", args.image_max_pixels),
+                ) if value is not None
+            }
+            _emit(model, tokenizer, prompt, config=config, tools=tools, stream=stream,
+                  as_json=args.json, stats=args.stats, images=args.image or None,
+                  images_kwargs=image_options or None)
+        elif args.command == "benchmark":
+            from .benchmark import benchmark
+
+            print(json.dumps(benchmark(model, tokenizer, prompt, config=config, tools=tools,
+                                       trials=args.trials, warmup_tokens=args.warmup_tokens), ensure_ascii=False, indent=2))
+        elif args.command == "chat":
+            messages = [{"role": "system", "content": args.system_prompt}] if args.system_prompt else []
+            initial = list(messages)
+            while True:
+                try:
+                    query = input(">> ")
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    break
+                if query == "/quit":
+                    break
+                if query == "/reset":
+                    messages = list(initial)
+                    continue
+                if not query.strip():
+                    continue
+                pending = [*messages, {"role": "user", "content": query}]
+                result = _emit(model, tokenizer, pending, config=config, stream=args.stream)
+                messages = [*pending, {"role": "assistant", "content": result.text}]
+    except KeyboardInterrupt:
+        return 130
+    except (OSError, TypeError, ValueError, RuntimeError) as error:
+        parser.exit(1, f"{error}\n")
+    return 0

@@ -1,0 +1,1028 @@
+{
+  "status": "running",
+  "mode": "dspark",
+  "requested": 1399,
+  "file_count": 13,
+  "options": {
+    "input": "/Users/xmhuang6/workspace/datasets/dspark_test",
+    "model": "/Users/xmhuang6/workspace/models/dspark_test_model/OPD_v1024_iter30001",
+    "output_dir": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542",
+    "resume": false,
+    "mode": "dspark",
+    "max_tokens": 4096,
+    "limit": null,
+    "temp": 1.0,
+    "top_p": 0.95,
+    "top_k": 0,
+    "draft_temperature": 1.0,
+    "draft_top_p": 1.0,
+    "draft_top_k": 0,
+    "seed": 0,
+    "device": "gpu",
+    "dtype": "checkpoint",
+    "raw_prompt": false,
+    "enable_thinking": true,
+    "reasoning_effort": "high",
+    "max_draft_tokens": null,
+    "confidence_threshold": 0.0,
+    "greedy_verification": "batched",
+    "w8_qmv_backend": "native",
+    "w4_qmv_backend": "native",
+    "fused_quantized_sdpa": null,
+    "fused_quantized_sdpa_prefill": null,
+    "tuned_bf16_sdpa": null,
+    "prefill_step_size": 512,
+    "kv_bits": null,
+    "kv_group_size": 32,
+    "quantized_kv_start": 0,
+    "kv_quantization_scope": "full-attention"
+  },
+  "model_load_seconds": 1.158964666974498,
+  "output_dir": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542",
+  "files": [
+    {
+      "source_file": "/Users/xmhuang6/workspace/datasets/dspark_test/aime24_format.json",
+      "output_file": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542/aime24_format.json.results.jsonl",
+      "requested": 30,
+      "succeeded": 30,
+      "failed": 0,
+      "status": "completed",
+      "metrics": {
+        "input_tokens": 5696,
+        "output_tokens": 113459,
+        "inference_seconds": 1361.441428082966,
+        "prefill_seconds": 4.732354583044071,
+        "generation_seconds": 1356.6643830011308,
+        "drafted_tokens": 179217,
+        "accepted_tokens": 87811,
+        "rounds": 25625,
+        "committed_tokens": 113429,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 3,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 7,
+            "drafted_tokens": 7,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.8571428571428571
+          },
+          "2": {
+            "rounds": 9,
+            "drafted_tokens": 18,
+            "accepted_tokens": 16,
+            "draft_acceptance_rate": 0.8888888888888888
+          },
+          "3": {
+            "rounds": 3,
+            "drafted_tokens": 9,
+            "accepted_tokens": 4,
+            "draft_acceptance_rate": 0.4444444444444444
+          },
+          "4": {
+            "rounds": 6,
+            "drafted_tokens": 24,
+            "accepted_tokens": 9,
+            "draft_acceptance_rate": 0.375
+          },
+          "5": {
+            "rounds": 8,
+            "drafted_tokens": 40,
+            "accepted_tokens": 21,
+            "draft_acceptance_rate": 0.525
+          },
+          "6": {
+            "rounds": 4,
+            "drafted_tokens": 24,
+            "accepted_tokens": 13,
+            "draft_acceptance_rate": 0.5416666666666666
+          },
+          "7": {
+            "rounds": 25585,
+            "drafted_tokens": 179095,
+            "accepted_tokens": 87742,
+            "draft_acceptance_rate": 0.4899187582009548
+          }
+        },
+        "tokens_per_second": 83.6308533058212,
+        "output_tokens_per_second": 83.33740817609807,
+        "mean_draft_length": 6.993834146341463,
+        "mean_acceptance_length": 4.426497560975609,
+        "draft_acceptance_rate": 0.4899702595177913
+      }
+    },
+    {
+      "source_file": "/Users/xmhuang6/workspace/datasets/dspark_test/aime25_format_30.json",
+      "output_file": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542/aime25_format_30.json.results.jsonl",
+      "requested": 30,
+      "succeeded": 30,
+      "failed": 0,
+      "status": "completed",
+      "metrics": {
+        "input_tokens": 8288,
+        "output_tokens": 111956,
+        "inference_seconds": 1361.6030015010037,
+        "prefill_seconds": 5.734755500045139,
+        "generation_seconds": 1355.8316841270134,
+        "drafted_tokens": 177681,
+        "accepted_tokens": 86532,
+        "rounds": 25400,
+        "committed_tokens": 111926,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 2,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 5,
+            "drafted_tokens": 5,
+            "accepted_tokens": 4,
+            "draft_acceptance_rate": 0.8
+          },
+          "2": {
+            "rounds": 4,
+            "drafted_tokens": 8,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.75
+          },
+          "3": {
+            "rounds": 7,
+            "drafted_tokens": 21,
+            "accepted_tokens": 18,
+            "draft_acceptance_rate": 0.8571428571428571
+          },
+          "4": {
+            "rounds": 3,
+            "drafted_tokens": 12,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.5
+          },
+          "5": {
+            "rounds": 7,
+            "drafted_tokens": 35,
+            "accepted_tokens": 27,
+            "draft_acceptance_rate": 0.7714285714285715
+          },
+          "6": {
+            "rounds": 4,
+            "drafted_tokens": 24,
+            "accepted_tokens": 14,
+            "draft_acceptance_rate": 0.5833333333333334
+          },
+          "7": {
+            "rounds": 25368,
+            "drafted_tokens": 177576,
+            "accepted_tokens": 86457,
+            "draft_acceptance_rate": 0.4868732261116367
+          }
+        },
+        "tokens_per_second": 82.57367143037796,
+        "output_tokens_per_second": 82.22367303581291,
+        "mean_draft_length": 6.995314960629921,
+        "mean_acceptance_length": 4.406535433070866,
+        "draft_acceptance_rate": 0.4870076147702906
+      }
+    },
+    {
+      "source_file": "/Users/xmhuang6/workspace/datasets/dspark_test/alpaca_format_80.json",
+      "output_file": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542/alpaca_format_80.json.results.jsonl",
+      "requested": 80,
+      "succeeded": 80,
+      "failed": 0,
+      "status": "completed",
+      "metrics": {
+        "input_tokens": 6863,
+        "output_tokens": 113876,
+        "inference_seconds": 2106.1404927521944,
+        "prefill_seconds": 8.857584960118402,
+        "generation_seconds": 2097.2312731251295,
+        "drafted_tokens": 279211,
+        "accepted_tokens": 73950,
+        "rounds": 39904,
+        "committed_tokens": 113796,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 3,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 7,
+            "drafted_tokens": 7,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.8571428571428571
+          },
+          "2": {
+            "rounds": 3,
+            "drafted_tokens": 6,
+            "accepted_tokens": 4,
+            "draft_acceptance_rate": 0.6666666666666666
+          },
+          "3": {
+            "rounds": 4,
+            "drafted_tokens": 12,
+            "accepted_tokens": 2,
+            "draft_acceptance_rate": 0.16666666666666666
+          },
+          "4": {
+            "rounds": 3,
+            "drafted_tokens": 12,
+            "accepted_tokens": 3,
+            "draft_acceptance_rate": 0.25
+          },
+          "5": {
+            "rounds": 4,
+            "drafted_tokens": 20,
+            "accepted_tokens": 7,
+            "draft_acceptance_rate": 0.35
+          },
+          "6": {
+            "rounds": 6,
+            "drafted_tokens": 36,
+            "accepted_tokens": 13,
+            "draft_acceptance_rate": 0.3611111111111111
+          },
+          "7": {
+            "rounds": 39874,
+            "drafted_tokens": 279118,
+            "accepted_tokens": 73915,
+            "draft_acceptance_rate": 0.26481631424702096
+          }
+        },
+        "tokens_per_second": 54.29825573328921,
+        "output_tokens_per_second": 54.068567786374395,
+        "mean_draft_length": 6.997067963111467,
+        "mean_acceptance_length": 2.8517441860465116,
+        "draft_acceptance_rate": 0.26485346207706717
+      }
+    },
+    {
+      "source_file": "/Users/xmhuang6/workspace/datasets/dspark_test/arena-hard-v2-format-80.json",
+      "output_file": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542/arena-hard-v2-format-80.json.results.jsonl",
+      "requested": 79,
+      "succeeded": 79,
+      "failed": 0,
+      "status": "completed",
+      "metrics": {
+        "input_tokens": 45503,
+        "output_tokens": 311845,
+        "inference_seconds": 5110.741288910911,
+        "prefill_seconds": 25.855042913957732,
+        "generation_seconds": 5084.756912250974,
+        "drafted_tokens": 664559,
+        "accepted_tokens": 216754,
+        "rounds": 95015,
+        "committed_tokens": 311766,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 22,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 13,
+            "drafted_tokens": 13,
+            "accepted_tokens": 12,
+            "draft_acceptance_rate": 0.9230769230769231
+          },
+          "2": {
+            "rounds": 21,
+            "drafted_tokens": 42,
+            "accepted_tokens": 33,
+            "draft_acceptance_rate": 0.7857142857142857
+          },
+          "3": {
+            "rounds": 18,
+            "drafted_tokens": 54,
+            "accepted_tokens": 40,
+            "draft_acceptance_rate": 0.7407407407407407
+          },
+          "4": {
+            "rounds": 25,
+            "drafted_tokens": 100,
+            "accepted_tokens": 49,
+            "draft_acceptance_rate": 0.49
+          },
+          "5": {
+            "rounds": 17,
+            "drafted_tokens": 85,
+            "accepted_tokens": 37,
+            "draft_acceptance_rate": 0.43529411764705883
+          },
+          "6": {
+            "rounds": 28,
+            "drafted_tokens": 168,
+            "accepted_tokens": 54,
+            "draft_acceptance_rate": 0.32142857142857145
+          },
+          "7": {
+            "rounds": 94871,
+            "drafted_tokens": 664097,
+            "accepted_tokens": 216529,
+            "draft_acceptance_rate": 0.3260502607299837
+          }
+        },
+        "tokens_per_second": 61.329382187112095,
+        "output_tokens_per_second": 61.017567192577175,
+        "mean_draft_length": 6.994253538914908,
+        "mean_acceptance_length": 3.2812292795874334,
+        "draft_acceptance_rate": 0.32616216167413276
+      }
+    },
+    {
+      "source_file": "/Users/xmhuang6/workspace/datasets/dspark_test/gsm8k_format_80.json",
+      "output_file": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542/gsm8k_format_80.json.results.jsonl",
+      "requested": 80,
+      "succeeded": 80,
+      "failed": 0,
+      "status": "completed",
+      "metrics": {
+        "input_tokens": 11571,
+        "output_tokens": 55074,
+        "inference_seconds": 652.9360467090737,
+        "prefill_seconds": 9.848980664799456,
+        "generation_seconds": 643.0614974580822,
+        "drafted_tokens": 86828,
+        "accepted_tokens": 42660,
+        "rounds": 12405,
+        "committed_tokens": 54994,
+        "draft_length_stats": {
+          "1": {
+            "rounds": 1,
+            "drafted_tokens": 1,
+            "accepted_tokens": 1,
+            "draft_acceptance_rate": 1.0
+          },
+          "6": {
+            "rounds": 1,
+            "drafted_tokens": 6,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 1.0
+          },
+          "7": {
+            "rounds": 12403,
+            "drafted_tokens": 86821,
+            "accepted_tokens": 42653,
+            "draft_acceptance_rate": 0.4912751523248984
+          }
+        },
+        "tokens_per_second": 85.64344190672057,
+        "output_tokens_per_second": 84.3482302402874,
+        "mean_draft_length": 6.999435711406691,
+        "mean_acceptance_length": 4.433212414349053,
+        "draft_acceptance_rate": 0.49131616529230204
+      }
+    },
+    {
+      "source_file": "/Users/xmhuang6/workspace/datasets/dspark_test/humaneval_format_80.json",
+      "output_file": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542/humaneval_format_80.json.results.jsonl",
+      "requested": 80,
+      "succeeded": 80,
+      "failed": 0,
+      "status": "completed",
+      "metrics": {
+        "input_tokens": 17016,
+        "output_tokens": 150148,
+        "inference_seconds": 2030.5520466719463,
+        "prefill_seconds": 12.746810666081728,
+        "generation_seconds": 2017.7396366639878,
+        "drafted_tokens": 267304,
+        "accepted_tokens": 111920,
+        "rounds": 38202,
+        "committed_tokens": 150068,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 4,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 7,
+            "drafted_tokens": 7,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.8571428571428571
+          },
+          "3": {
+            "rounds": 3,
+            "drafted_tokens": 9,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.6666666666666666
+          },
+          "4": {
+            "rounds": 4,
+            "drafted_tokens": 16,
+            "accepted_tokens": 14,
+            "draft_acceptance_rate": 0.875
+          },
+          "5": {
+            "rounds": 6,
+            "drafted_tokens": 30,
+            "accepted_tokens": 23,
+            "draft_acceptance_rate": 0.7666666666666667
+          },
+          "6": {
+            "rounds": 4,
+            "drafted_tokens": 24,
+            "accepted_tokens": 10,
+            "draft_acceptance_rate": 0.4166666666666667
+          },
+          "7": {
+            "rounds": 38174,
+            "drafted_tokens": 267218,
+            "accepted_tokens": 111861,
+            "draft_acceptance_rate": 0.4186132670703321
+          }
+        },
+        "tokens_per_second": 74.41396167854732,
+        "output_tokens_per_second": 73.94442326464421,
+        "mean_draft_length": 6.997120569603686,
+        "mean_acceptance_length": 3.9282760064918065,
+        "draft_acceptance_rate": 0.41869930865232097
+      }
+    },
+    {
+      "source_file": "/Users/xmhuang6/workspace/datasets/dspark_test/lbpp_format_80.json",
+      "output_file": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542/lbpp_format_80.json.results.jsonl",
+      "requested": 80,
+      "succeeded": 80,
+      "failed": 0,
+      "status": "completed",
+      "metrics": {
+        "input_tokens": 15827,
+        "output_tokens": 276677,
+        "inference_seconds": 3963.0530177509645,
+        "prefill_seconds": 12.219828794099158,
+        "generation_seconds": 3950.745072622929,
+        "drafted_tokens": 520214,
+        "accepted_tokens": 202250,
+        "rounds": 74370,
+        "committed_tokens": 276597,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 12,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 13,
+            "drafted_tokens": 13,
+            "accepted_tokens": 11,
+            "draft_acceptance_rate": 0.8461538461538461
+          },
+          "2": {
+            "rounds": 15,
+            "drafted_tokens": 30,
+            "accepted_tokens": 25,
+            "draft_acceptance_rate": 0.8333333333333334
+          },
+          "3": {
+            "rounds": 14,
+            "drafted_tokens": 42,
+            "accepted_tokens": 33,
+            "draft_acceptance_rate": 0.7857142857142857
+          },
+          "4": {
+            "rounds": 12,
+            "drafted_tokens": 48,
+            "accepted_tokens": 31,
+            "draft_acceptance_rate": 0.6458333333333334
+          },
+          "5": {
+            "rounds": 16,
+            "drafted_tokens": 80,
+            "accepted_tokens": 38,
+            "draft_acceptance_rate": 0.475
+          },
+          "6": {
+            "rounds": 15,
+            "drafted_tokens": 90,
+            "accepted_tokens": 41,
+            "draft_acceptance_rate": 0.45555555555555555
+          },
+          "7": {
+            "rounds": 74273,
+            "drafted_tokens": 519911,
+            "accepted_tokens": 202071,
+            "draft_acceptance_rate": 0.38866459836395073
+          }
+        },
+        "tokens_per_second": 70.0316003473016,
+        "output_tokens_per_second": 69.81410512570291,
+        "mean_draft_length": 6.994944197929272,
+        "mean_acceptance_length": 3.719201290843082,
+        "draft_acceptance_rate": 0.38878230881906295
+      }
+    },
+    {
+      "source_file": "/Users/xmhuang6/workspace/datasets/dspark_test/livecodebench_format_80.json",
+      "output_file": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542/livecodebench_format_80.json.results.jsonl",
+      "requested": 80,
+      "succeeded": 80,
+      "failed": 0,
+      "status": "completed",
+      "metrics": {
+        "input_tokens": 48066,
+        "output_tokens": 247155,
+        "inference_seconds": 3738.1745006281126,
+        "prefill_seconds": 24.06217283278238,
+        "generation_seconds": 3714.0139127079165,
+        "drafted_tokens": 486855,
+        "accepted_tokens": 177504,
+        "rounds": 69601,
+        "committed_tokens": 247075,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 13,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 9,
+            "drafted_tokens": 9,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.6666666666666666
+          },
+          "2": {
+            "rounds": 17,
+            "drafted_tokens": 34,
+            "accepted_tokens": 31,
+            "draft_acceptance_rate": 0.9117647058823529
+          },
+          "3": {
+            "rounds": 8,
+            "drafted_tokens": 24,
+            "accepted_tokens": 16,
+            "draft_acceptance_rate": 0.6666666666666666
+          },
+          "4": {
+            "rounds": 16,
+            "drafted_tokens": 64,
+            "accepted_tokens": 30,
+            "draft_acceptance_rate": 0.46875
+          },
+          "5": {
+            "rounds": 14,
+            "drafted_tokens": 70,
+            "accepted_tokens": 34,
+            "draft_acceptance_rate": 0.4857142857142857
+          },
+          "6": {
+            "rounds": 14,
+            "drafted_tokens": 84,
+            "accepted_tokens": 35,
+            "draft_acceptance_rate": 0.4166666666666667
+          },
+          "7": {
+            "rounds": 69510,
+            "drafted_tokens": 486570,
+            "accepted_tokens": 177352,
+            "draft_acceptance_rate": 0.364494317364408
+          }
+        },
+        "tokens_per_second": 66.54660047296305,
+        "output_tokens_per_second": 66.11649615566941,
+        "mean_draft_length": 6.994942601399405,
+        "mean_acceptance_length": 3.5498771569374004,
+        "draft_acceptance_rate": 0.3645931540191638
+      }
+    },
+    {
+      "source_file": "/Users/xmhuang6/workspace/datasets/dspark_test/math_format_80.json",
+      "output_file": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542/math_format_80.json.results.jsonl",
+      "requested": 80,
+      "succeeded": 80,
+      "failed": 0,
+      "status": "completed",
+      "metrics": {
+        "input_tokens": 11608,
+        "output_tokens": 126827,
+        "inference_seconds": 1409.0543114598258,
+        "prefill_seconds": 10.328754210961051,
+        "generation_seconds": 1398.684774296824,
+        "drafted_tokens": 186211,
+        "accepted_tokens": 100194,
+        "rounds": 26613,
+        "committed_tokens": 126747,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 2,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 3,
+            "drafted_tokens": 3,
+            "accepted_tokens": 2,
+            "draft_acceptance_rate": 0.6666666666666666
+          },
+          "2": {
+            "rounds": 3,
+            "drafted_tokens": 6,
+            "accepted_tokens": 3,
+            "draft_acceptance_rate": 0.5
+          },
+          "3": {
+            "rounds": 5,
+            "drafted_tokens": 15,
+            "accepted_tokens": 4,
+            "draft_acceptance_rate": 0.26666666666666666
+          },
+          "4": {
+            "rounds": 3,
+            "drafted_tokens": 12,
+            "accepted_tokens": 8,
+            "draft_acceptance_rate": 0.6666666666666666
+          },
+          "5": {
+            "rounds": 2,
+            "drafted_tokens": 10,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "7": {
+            "rounds": 26595,
+            "drafted_tokens": 186165,
+            "accepted_tokens": 100177,
+            "draft_acceptance_rate": 0.5381086670426772
+          }
+        },
+        "tokens_per_second": 90.67589948118305,
+        "output_tokens_per_second": 90.00859581388536,
+        "mean_draft_length": 6.996993950325029,
+        "mean_acceptance_length": 4.7625972269191745,
+        "draft_acceptance_rate": 0.5380670314857876
+      }
+    },
+    {
+      "source_file": "/Users/xmhuang6/workspace/datasets/dspark_test/math_system.jsonl",
+      "output_file": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542/math_system.jsonl.results.jsonl",
+      "requested": 300,
+      "succeeded": 300,
+      "failed": 0,
+      "status": "completed",
+      "metrics": {
+        "input_tokens": 65593,
+        "output_tokens": 777936,
+        "inference_seconds": 10686.05941450101,
+        "prefill_seconds": 44.18255454613245,
+        "generation_seconds": 10641.642870253214,
+        "drafted_tokens": 1405874,
+        "accepted_tokens": 576791,
+        "rounds": 200980,
+        "committed_tokens": 777636,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 38,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 39,
+            "drafted_tokens": 39,
+            "accepted_tokens": 30,
+            "draft_acceptance_rate": 0.7692307692307693
+          },
+          "2": {
+            "rounds": 37,
+            "drafted_tokens": 74,
+            "accepted_tokens": 52,
+            "draft_acceptance_rate": 0.7027027027027027
+          },
+          "3": {
+            "rounds": 28,
+            "drafted_tokens": 84,
+            "accepted_tokens": 48,
+            "draft_acceptance_rate": 0.5714285714285714
+          },
+          "4": {
+            "rounds": 33,
+            "drafted_tokens": 132,
+            "accepted_tokens": 85,
+            "draft_acceptance_rate": 0.6439393939393939
+          },
+          "5": {
+            "rounds": 32,
+            "drafted_tokens": 160,
+            "accepted_tokens": 82,
+            "draft_acceptance_rate": 0.5125
+          },
+          "6": {
+            "rounds": 26,
+            "drafted_tokens": 156,
+            "accepted_tokens": 82,
+            "draft_acceptance_rate": 0.5256410256410257
+          },
+          "7": {
+            "rounds": 200747,
+            "drafted_tokens": 1405229,
+            "accepted_tokens": 576412,
+            "draft_acceptance_rate": 0.4101907945253051
+          }
+        },
+        "tokens_per_second": 73.10299823860649,
+        "output_tokens_per_second": 72.79914604857416,
+        "mean_draft_length": 6.995094039207881,
+        "mean_acceptance_length": 3.86922081799184,
+        "draft_acceptance_rate": 0.41027218655441383
+      }
+    },
+    {
+      "source_file": "/Users/xmhuang6/workspace/datasets/dspark_test/mbpp_format_80.json",
+      "output_file": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542/mbpp_format_80.json.results.jsonl",
+      "requested": 80,
+      "succeeded": 80,
+      "failed": 0,
+      "status": "completed",
+      "metrics": {
+        "input_tokens": 6716,
+        "output_tokens": 157431,
+        "inference_seconds": 1985.0303998739691,
+        "prefill_seconds": 8.543877623975277,
+        "generation_seconds": 1976.4462799181056,
+        "drafted_tokens": 264365,
+        "accepted_tokens": 119622,
+        "rounds": 37783,
+        "committed_tokens": 157351,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 4,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 7,
+            "drafted_tokens": 7,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.8571428571428571
+          },
+          "2": {
+            "rounds": 2,
+            "drafted_tokens": 4,
+            "accepted_tokens": 2,
+            "draft_acceptance_rate": 0.5
+          },
+          "3": {
+            "rounds": 3,
+            "drafted_tokens": 9,
+            "accepted_tokens": 5,
+            "draft_acceptance_rate": 0.5555555555555556
+          },
+          "4": {
+            "rounds": 3,
+            "drafted_tokens": 12,
+            "accepted_tokens": 10,
+            "draft_acceptance_rate": 0.8333333333333334
+          },
+          "5": {
+            "rounds": 5,
+            "drafted_tokens": 25,
+            "accepted_tokens": 11,
+            "draft_acceptance_rate": 0.44
+          },
+          "6": {
+            "rounds": 5,
+            "drafted_tokens": 30,
+            "accepted_tokens": 24,
+            "draft_acceptance_rate": 0.8
+          },
+          "7": {
+            "rounds": 37754,
+            "drafted_tokens": 264278,
+            "accepted_tokens": 119564,
+            "draft_acceptance_rate": 0.45241753002520074
+          }
+        },
+        "tokens_per_second": 79.6535689330869,
+        "output_tokens_per_second": 79.30911285287893,
+        "mean_draft_length": 6.996929836169706,
+        "mean_acceptance_length": 4.164597835005161,
+        "draft_acceptance_rate": 0.45248803737257204
+      }
+    },
+    {
+      "source_file": "/Users/xmhuang6/workspace/datasets/dspark_test/spark_agent_log_format_100.json",
+      "output_file": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542/spark_agent_log_format_100.json.results.jsonl",
+      "requested": 100,
+      "succeeded": 100,
+      "failed": 0,
+      "status": "completed",
+      "metrics": {
+        "input_tokens": 3531733,
+        "output_tokens": 79107,
+        "inference_seconds": 4278.612326296105,
+        "prefill_seconds": 2648.9094873318973,
+        "generation_seconds": 1629.4832207128347,
+        "drafted_tokens": 167856,
+        "accepted_tokens": 55100,
+        "rounds": 23990,
+        "committed_tokens": 79007,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 5,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 1,
+            "drafted_tokens": 1,
+            "accepted_tokens": 1,
+            "draft_acceptance_rate": 1.0
+          },
+          "2": {
+            "rounds": 2,
+            "drafted_tokens": 4,
+            "accepted_tokens": 2,
+            "draft_acceptance_rate": 0.5
+          },
+          "3": {
+            "rounds": 3,
+            "drafted_tokens": 9,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.6666666666666666
+          },
+          "4": {
+            "rounds": 2,
+            "drafted_tokens": 8,
+            "accepted_tokens": 1,
+            "draft_acceptance_rate": 0.125
+          },
+          "5": {
+            "rounds": 2,
+            "drafted_tokens": 10,
+            "accepted_tokens": 2,
+            "draft_acceptance_rate": 0.2
+          },
+          "6": {
+            "rounds": 1,
+            "drafted_tokens": 6,
+            "accepted_tokens": 1,
+            "draft_acceptance_rate": 0.16666666666666666
+          },
+          "7": {
+            "rounds": 23974,
+            "drafted_tokens": 167818,
+            "accepted_tokens": 55087,
+            "draft_acceptance_rate": 0.3282544184771598
+          }
+        },
+        "tokens_per_second": 48.54729339611966,
+        "output_tokens_per_second": 18.488938461148475,
+        "mean_draft_length": 6.99691538140892,
+        "mean_acceptance_length": 3.2933305543976656,
+        "draft_acceptance_rate": 0.3282575540939853
+      }
+    },
+    {
+      "source_file": "/Users/xmhuang6/workspace/datasets/dspark_test/spark_agent_log_format_300.json",
+      "output_file": "/Users/xmhuang6/workspace/spark_mlx_llm_my/.results/dspark-swa-block7-target-p095-draft-p1-4096-high-20261027_210542/spark_agent_log_format_300.json.results.jsonl",
+      "requested": 300,
+      "succeeded": 192,
+      "failed": 0,
+      "status": "running",
+      "metrics": {
+        "input_tokens": 6216624,
+        "output_tokens": 153804,
+        "inference_seconds": 7943.144178708229,
+        "prefill_seconds": 4628.109424297989,
+        "generation_seconds": 3314.620934843173,
+        "drafted_tokens": 333774,
+        "accepted_tokens": 106070,
+        "rounds": 47697,
+        "committed_tokens": 153612,
+        "draft_length_stats": {
+          "0": {
+            "rounds": 6,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "draft_acceptance_rate": 0.0
+          },
+          "1": {
+            "rounds": 3,
+            "drafted_tokens": 3,
+            "accepted_tokens": 3,
+            "draft_acceptance_rate": 1.0
+          },
+          "2": {
+            "rounds": 3,
+            "drafted_tokens": 6,
+            "accepted_tokens": 4,
+            "draft_acceptance_rate": 0.6666666666666666
+          },
+          "3": {
+            "rounds": 4,
+            "drafted_tokens": 12,
+            "accepted_tokens": 8,
+            "draft_acceptance_rate": 0.6666666666666666
+          },
+          "4": {
+            "rounds": 2,
+            "drafted_tokens": 8,
+            "accepted_tokens": 1,
+            "draft_acceptance_rate": 0.125
+          },
+          "5": {
+            "rounds": 4,
+            "drafted_tokens": 20,
+            "accepted_tokens": 6,
+            "draft_acceptance_rate": 0.3
+          },
+          "7": {
+            "rounds": 47675,
+            "drafted_tokens": 333725,
+            "accepted_tokens": 106048,
+            "draft_acceptance_rate": 0.3177706195220616
+          }
+        },
+        "tokens_per_second": 46.401686052006134,
+        "output_tokens_per_second": 19.36311321306177,
+        "mean_draft_length": 6.997798603685767,
+        "mean_acceptance_length": 3.2205799106862067,
+        "draft_acceptance_rate": 0.31778988177629175
+      }
+    }
+  ],
+  "resume_count": 0,
+  "succeeded": 1291,
+  "failed": 0,
+  "metrics": {
+    "input_tokens": 9991104,
+    "output_tokens": 2675295,
+    "inference_seconds": 46626.54245384631,
+    "prefill_seconds": 7444.131628925883,
+    "generation_seconds": 39180.922451981314,
+    "drafted_tokens": 5019949,
+    "accepted_tokens": 1957158,
+    "rounds": 717585,
+    "committed_tokens": 2674004,
+    "draft_length_stats": {
+      "0": {
+        "rounds": 114,
+        "drafted_tokens": 0,
+        "accepted_tokens": 0,
+        "draft_acceptance_rate": 0.0
+      },
+      "1": {
+        "rounds": 115,
+        "drafted_tokens": 115,
+        "accepted_tokens": 94,
+        "draft_acceptance_rate": 0.8173913043478261
+      },
+      "2": {
+        "rounds": 116,
+        "drafted_tokens": 232,
+        "accepted_tokens": 178,
+        "draft_acceptance_rate": 0.7672413793103449
+      },
+      "3": {
+        "rounds": 100,
+        "drafted_tokens": 300,
+        "accepted_tokens": 190,
+        "draft_acceptance_rate": 0.6333333333333333
+      },
+      "4": {
+        "rounds": 112,
+        "drafted_tokens": 448,
+        "accepted_tokens": 247,
+        "draft_acceptance_rate": 0.5513392857142857
+      },
+      "5": {
+        "rounds": 117,
+        "drafted_tokens": 585,
+        "accepted_tokens": 288,
+        "draft_acceptance_rate": 0.49230769230769234
+      },
+      "6": {
+        "rounds": 108,
+        "drafted_tokens": 648,
+        "accepted_tokens": 293,
+        "draft_acceptance_rate": 0.4521604938271605
+      },
+      "7": {
+        "rounds": 716803,
+        "drafted_tokens": 5017621,
+        "accepted_tokens": 1955868,
+        "draft_acceptance_rate": 0.38979986730763444
+      }
+    },
+    "tokens_per_second": 68.28055167100118,
+    "output_tokens_per_second": 57.37708307769473,
+    "mean_draft_length": 6.995615850387062,
+    "mean_acceptance_length": 3.7263933889365024,
+    "draft_acceptance_rate": 0.38987607244615435
+  },
+  "run_seconds": 46645.97970975001
+}

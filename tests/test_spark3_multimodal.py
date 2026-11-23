@@ -13,7 +13,8 @@ import pytest
 from mlx.utils import tree_flatten
 from mlx_lm.models.cache import load_prompt_cache, save_prompt_cache, trim_prompt_cache
 
-from spark_mlx_llm.loader import _validate_checkpoint_files, load
+from spark_mlx_llm._target_loader import _validate_checkpoint_files
+from spark_mlx_llm.loader import load
 from spark_mlx_llm.mrope import MultimodalRoPE, build_mrope_positions
 from spark_mlx_llm.multimodal import _PositionedModel
 from spark_mlx_llm.processing_spark3 import Spark3Processor
@@ -393,7 +394,9 @@ def test_equal_text_axes_match_basic_rope(device):
 
 
 def test_multimodal_strict_loader_roundtrip(tmp_path, monkeypatch):
-    from spark_mlx_llm import loader
+    from types import SimpleNamespace
+
+    from spark_mlx_llm import _target_loader as loader
 
     args = tiny_args()
     model = Model(args)
@@ -405,7 +408,9 @@ def test_multimodal_strict_loader_roundtrip(tmp_path, monkeypatch):
             {"model_type": "spark3", "text_config": text, "vision_config": vision}
         )
     )
-    monkeypatch.setattr(loader, "_load_tokenizer", lambda *args: object())
+    monkeypatch.setattr(
+        loader, "_load_tokenizer", lambda *args: SimpleNamespace(eos_token_ids=set())
+    )
     loaded, _ = load(tmp_path)
     ids, pixels, grids, offsets = image_inputs()
     kwargs = {"pixel_values": pixels, "image_grid_thw": grids, "image_offsets": offsets}

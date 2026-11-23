@@ -1,0 +1,71 @@
+"""Command-line conversion of local Spark BF16 and INT4 checkpoints."""
+
+import argparse
+import json
+from pathlib import Path
+
+from .. import conversion
+
+
+def main(argv=None, *, prog=None):
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description=conversion.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--source",
+        required=True,
+        type=Path,
+        help="Local model directory or Spark target GGUF file",
+    )
+    parser.add_argument("--output", type=Path, help="New MLX directory; must not exist")
+    parser.add_argument(
+        "--draft-source",
+        type=Path,
+        help="Attach a standalone Spark DSpark BF16 GGUF or Safetensors directory",
+    )
+    parser.add_argument(
+        "--quantization",
+        choices=("mixed", "none"),
+        default="mixed",
+        help="mixed: W4/G32 + per-channel W8; none: retain BF16 target",
+    )
+    parser.add_argument(
+        "--inspect", action="store_true", help="Validate metadata; write nothing"
+    )
+    parser.add_argument(
+        "--chunk-rows", type=int, default=256, help="Rows processed on CPU at once"
+    )
+    args = parser.parse_args(argv)
+    try:
+        result = conversion.convert_to_mlx(
+            args.source,
+            args.output,
+            draft_source=args.draft_source,
+            quantization=args.quantization,
+            inspect_only=args.inspect,
+            chunk_rows=args.chunk_rows,
+        )
+    except (ValueError, TypeError, OSError, KeyError, NotImplementedError) as error:
+        parser.exit(1, f"Conversion failed: {error}\n")
+    print(
+        json.dumps(
+            {
+                k: v
+                for k, v in result.items()
+                if k
+                not in (
+                    "coefficient_rounding",
+                    "source_quantization_config",
+                    "newly_quantized_modules",
+                )
+            },
+            indent=2,
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()

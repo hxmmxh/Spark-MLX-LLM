@@ -1,10 +1,8 @@
 import sys
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 
-import pytest
-
-from spark_mlx_llm import mlx_tools, spark3
 from spark_mlx_llm import spark2_5 as spark_model
+from spark_mlx_llm import spark3
 from spark_mlx_llm.registration import MODEL_MODULE, SPARK3_MODEL_MODULE, register_model
 
 
@@ -40,34 +38,3 @@ def test_register_model_preserves_native_spark3(monkeypatch):
     monkeypatch.setitem(sys.modules, SPARK3_MODEL_MODULE, native)
     register_model()
     assert sys.modules[SPARK3_MODEL_MODULE] is native
-
-
-@pytest.mark.parametrize(
-    ("entry_point", "command"),
-    [
-        (mlx_tools.convert_main, "convert"),
-        (mlx_tools.chat_main, "chat"),
-        (mlx_tools.server_main, "server"),
-    ],
-)
-def test_mlx_lm_entry_points_register_before_delegating(
-    monkeypatch, entry_point, command
-):
-    events = []
-
-    monkeypatch.setattr(
-        mlx_tools,
-        "register_model",
-        lambda: events.append("register"),
-    )
-    monkeypatch.setattr(
-        mlx_tools.importlib,
-        "import_module",
-        lambda module_name: SimpleNamespace(
-            main=lambda: events.append(module_name),
-        ),
-    )
-
-    entry_point()
-
-    assert events == ["register", f"mlx_lm.{command}"]
