@@ -5,6 +5,7 @@
 | Topic / 主题 | Guide / 文档 |
 | --- | --- |
 | Spark X3 text and images / 文本与图像 | [Spark X3 guide](spark3.md) |
+| Spark X3 ViT fusion / 视觉融合 | [计算流程、精简实现与验证](vit-fusion.md) |
 | Environment setup / 环境配置 | [English](en/environment.md) · [中文](zh/environment.md) |
 | Prebuilt macOS release usage / macOS 发布包使用 | [English](en/release-package.md) · [中文](zh/release-package.md) |
 | macOS release build / macOS 发布包构建 | [构建指南](zh/release.md) |

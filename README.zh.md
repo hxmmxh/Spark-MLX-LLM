@@ -181,6 +181,7 @@ HTTP 保留原有的 2048-token 默认值，可显式覆盖。
 
 | 主题 | 文档 |
 | --- | --- |
+| Spark X3 ViT 计算流程、精简实现与验证 | [视觉融合说明](docs/vit-fusion.md) |
 | 安装、平台要求与常见问题 | [环境配置](docs/zh/environment.md) |
 | 预编译发布包的解压、诊断与模型部署 | [发布包使用指南](docs/zh/release-package.md) |
 | CLI、Python、HTTP、思考模式与 KV 缓存 | [接口使用说明](docs/zh/examples.md) |

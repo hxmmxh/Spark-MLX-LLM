@@ -227,3 +227,8 @@ spark_mlx_llm/dspark
 
 # Public inference conformance is part of the supported API.
 tests
+
+# Keep the ViT fusion regression test reviewable.
+!/tests/
+/tests/*
+!/tests/test_vit_fusion.py

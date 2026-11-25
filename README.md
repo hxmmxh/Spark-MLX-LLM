@@ -202,6 +202,7 @@ See the [documentation index](docs/README.md) for all guides.
 | Topic | Guide |
 | --- | --- |
 | Spark X3 text, ViT, images, and W4/head8 quantization | [Spark X3 guide](docs/spark3.md) |
+| Spark X3 ViT computation, segmented fusion, and validation | [ViT fusion guide](docs/vit-fusion.md) |
 | Installation, platform requirements, and troubleshooting | [Environment setup](docs/en/environment.md) |
 | Extracting, diagnosing, and deploying models with the prebuilt release | [Release package guide](docs/en/release-package.md) |
 | CLI, Python, HTTP, thinking modes, and KV caching | [Interface guide](docs/en/examples.md) |

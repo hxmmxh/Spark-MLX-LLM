@@ -25,8 +25,11 @@ class VisionArgs(BaseModelArgs):
     layer_norm_eps: float = 1e-6
     rope_theta: float = 10000.0
     rope_alpha: float = 1.0
+    block_backend: str = "native"
 
     def __post_init__(self):
+        if self.block_backend not in ("native", "segmented"):
+            raise ValueError("vision block_backend must be native or segmented")
         if self.base_grid is None:
             side = math.isqrt(self.num_position_embeddings)
             self.base_grid = (side, side)
@@ -175,12 +178,18 @@ class VisionMLP(nn.Module):
 class VisionBlock(nn.Module):
     def __init__(self, args):
         super().__init__()
+        self.block_backend = args.block_backend
         self.norm1 = nn.LayerNorm(args.hidden_size, eps=args.layer_norm_eps)
         self.norm2 = nn.LayerNorm(args.hidden_size, eps=args.layer_norm_eps)
         self.attn = VisionAttention(args)
         self.mlp = VisionMLP(args)
 
     def __call__(self, hidden, cos, sin, lengths):
+        if self.block_backend == "segmented":
+            from .vit_fusion import forward_block, supports
+
+            if supports(self, hidden, cos, sin, lengths):
+                return forward_block(self, hidden, cos, sin, lengths)
         hidden = hidden + self.attn(self.norm1(hidden), cos, sin, lengths)
         return hidden + self.mlp(self.norm2(hidden))
 

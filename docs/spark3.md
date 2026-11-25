@@ -66,6 +66,11 @@ RoPE, pre-norm Transformer blocks, and a 2x2 spatial merger. It accepts the
 checkpoint's `model.visual.*` names and the shorter `visual.*` prefix. Vision
 weight shapes are strictly checked. Video and audio are not supported.
 
+The vision implementation keeps the original `native` path and one optional
+`segmented` backend. The final QKV/RoPE, Attention, projection and MLP kernels
+live in `spark_mlx_llm/vit_fusion`. See the [ViT fusion guide](vit-fusion.md)
+for the computation flow, configuration, fixed-input tests and measured results.
+
 The text model reads `mrope_section` and `mrope_interleaved` independently for
 SWA/FULL layers, including the interleaved layout used by `hf_latest`. Image
 tokens receive T/H/W coordinates; later text and decode retain the resulting
