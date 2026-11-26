@@ -28,9 +28,17 @@ low 思考，两项异步均开启。结果包含实际参数及 prompt 哈希�
       --max-draft-tokens 3 \
       --asynchronous-draft --async-context --compile-draft-chain \
       --seed 0 --prefill-step-size 512 \
+      --prefill-newlines lf --cache-limit-mib 256 \
+      --prompt-cache-size -1 --prompt-cache-bytes 4294967296 \
       --max-context-length 262144 --max-tokens 262144
 
 在另一个终端测试 HTTP 请求：
+  指定模型时默认预热包内 AStudio 固定前缀，完成后再接收请求。
+  --prefill-file FILE 替换前缀；--skip-prefill 跳过；--prefill-newlines preserve 保留换行。
+  客户端仍发送完整请求，usage.prompt_tokens_details.cached_tokens 显示实际缓存命中数。
+  上面的 -1 取消条目数限制，仅按 4 GiB KV 总量淘汰；正数限制条目数，省略时为 10。
+  dSpark 保存输入前缀及已提交回答的 target KV/draft 上下文，发送完整历史可复用多轮缓存。
+  --prompt-cache-size 0 --skip-prefill 禁用缓存并跳过启动预热。
   curl --fail-with-body http://127.0.0.1:8080/v1/chat/completions \
       -H 'Content-Type: application/json' \
       -d '{"model":"spark-x2.6-4b","messages":[{"role":"user","content":"你好"}],"stream":false}'

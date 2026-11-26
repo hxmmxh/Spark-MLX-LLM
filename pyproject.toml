@@ -28,6 +28,9 @@ spark-mlx-ext = { path = "extensions/spark-mlx-ext", editable = true }
 [tool.setuptools.packages.find]
 include = ["spark_mlx_llm*"]
 
+[tool.setuptools.package-data]
+spark_mlx_llm = ["astudio_template/*.txt", "astudio_template/*.json"]
+
 [tool.ruff]
 line-length = 88
 target-version = "py310"

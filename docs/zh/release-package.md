@@ -50,6 +50,14 @@ cd spark-mlx-0.1.2-macos26-arm64
 
 ### 启动服务
 
+指定模型时，服务默认预热包内 AStudio 固定前缀，完成后再开始接收 HTTP 请求。
+默认模板随发布包安装，路径不依赖当前工作目录，无需另行指定文件。
+当前模板捕获于 2026-11-26，来自 AStudio 3.7.1 / Sites 1.0.18；客户端工具或技能配置变化后需要重新捕获。
+终端依次显示 `Prefill complete: ... input tokens, ... cached tokens` 和
+`Starting httpd ...` 后，再连接客户端。
+客户端继续发送完整请求；实际命中数见 `usage.prompt_tokens_details.cached_tokens`。
+完整行为见[启动预热说明](../inference.md#启动时预先-prefill-固定前缀)。
+
 下面列出 4B 主模型及配套草稿的建议参数。替换两个模型路径后运行，并保持当前终端开启：
 
 ```sh
@@ -65,9 +73,40 @@ cd spark-mlx-0.1.2-macos26-arm64
     --max-draft-tokens 3 \
     --asynchronous-draft --async-context --compile-draft-chain \
     --seed 0 --prefill-step-size 512 \
+    --prefill-newlines lf --cache-limit-mib 256 \
+    --prompt-cache-size -1 --prompt-cache-bytes 4294967296 \
     --max-context-length 262144 \
     --max-tokens 262144
 ```
+
+需要自定义预热时，在上面的启动命令末尾追加相应参数：
+
+| 参数 | 用法 |
+|---|---|
+| `--prefill-file /path/to/prefix.txt` | 使用自己的 UTF-8 已渲染前缀，保留特殊消息标记和空白，不重复套聊天模板。省略时使用包内默认模板。 |
+| `--prefill-newlines lf` | 将 CRLF/CR 规范为 LF，默认开启；改为 `--prefill-newlines preserve` 可保留文件原换行。 |
+| `--skip-prefill` | 跳过启动预热，不能与 `--prefill-file` 同时使用。 |
+| `--cache-limit-mib 256` | 启动预热时设置 MLX 分配器的临时缓存上限，单位 MiB；KV 前缀容量由 `--prompt-cache-bytes` 控制。 |
+
+例如，自定义前缀时追加 `--prefill-file /path/to/prefix.txt`；跳过预热时追加
+`--skip-prefill`。上述预热参数仅在服务启动时设置。
+普通解码和 dSpark 均支持前缀复用；dSpark 同时预热 target KV 与 draft 上下文。
+dSpark 也会缓存真实请求的前缀，供新窗口复用；动态窗口信息之后的内容仍需计算。
+若启动模板不匹配，相同输入可从下次请求复用；新发现的共同前缀需先保存一次。
+日志中的 `dSpark prompt cache: ... cached=... remaining=...` 可确认实际命中。
+生成后也会缓存已提交的回答 KV 和 draft 上下文，后续发送完整历史可复用多轮前缀；
+输入与生成后状态均占用缓存容量，未执行前向的末 token 仍需在下一轮计算。
+
+上面的命令只限制 KV 总容量为 4 GiB，不限制条目数。容量参数的含义如下：
+
+| 参数 | 用法 |
+|---|---|
+| `--prompt-cache-size -1` | 不限制条目数；正数限制条目数，省略时沿用上游默认的 10 条。一个对话可以占用多个条目。 |
+| `--prompt-cache-bytes 4294967296` | KV 总容量上限为 4 GiB，包含输入前缀、已提交的回答 KV 和 draft 上下文；超出后按缓存策略淘汰。 |
+| `--prompt-cache-size 0 --skip-prefill` | 禁用请求缓存，同时跳过需要缓存条目的启动预热。 |
+
+`--prompt-cache-bytes` 控制 KV 缓存池容量；`--cache-limit-mib` 控制 MLX 分配器
+保留的临时缓存。两者均不包含模型权重的容量。
 
 使用 1.7B 时，同时替换主模型、草稿路径及服务模型名。普通解码省略草稿相关参数。
 关闭思考时，将 `--enable-thinking` 替换为 `--no-enable-thinking`。

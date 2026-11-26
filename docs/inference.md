@@ -157,6 +157,60 @@ rejects `kv_bits`, `kv_group_size`, `quantized_kv_start`, and
 The Python API and generation/chat/benchmark CLI retain KV quantization support.
 `--prefill-step-size` remains a server startup option.
 
+### 启动时预先 prefill 固定前缀
+
+指定 `--model` 时，HTTP 服务默认读取包内 `astudio_template/template.txt`，
+完成预热后才开始接收请求。模板来自最近一次 AStudio 真实请求的固定前缀，
+捕获时间、客户端/技能版本、SHA-256 和验证 token 数见同目录 `template-info.json`；
+默认路径由安装位置确定，不依赖启动目录，wheel 和 macOS 发布包均包含该资源。
+不指定 `--model` 的动态加载服务不执行启动预热。
+
+```sh
+spark-mlx server --model TARGET --draft-model DRAFT
+spark-mlx server --model TARGET --prefill-file /path/to/rendered-prefix.txt
+spark-mlx server --model TARGET --skip-prefill
+```
+
+文件按 UTF-8 读取，默认将 CRLF/CR 规范成 LF；`--prefill-newlines preserve` 保留原换行。
+其余空白及特殊消息 token 保留，不额外添加 BOS，不重复应用聊天模板，也不采样输出。
+`--prefill-file` 与 `--skip-prefill` 不能同时使用；这些选项也可在 `--config` 中设置
+`prefill_file`、`prefill_newlines`、`skip_prefill`，仅对服务启动生效。
+
+终端显示 `Prefill complete: ... input tokens, ... cached tokens` 后才启动 HTTP。
+为保证相同输入仍能计算首 token 的 logits，固定前缀的最后一个 token 留给正式请求计算，
+所以缓存数比输入数少 1。预热失败会终止启动；前缀必须给 `max_context_length` 留出输出空间，
+缓存配置必须允许至少一个条目且足以容纳前缀。分块大小沿用 `--prefill-step-size`。
+启动预热同时应用 `cache_limit_mib`（默认 256 MiB）控制 MLX 分配器保留的临时内存；
+KV 前缀的容量限制仍由上游 `--prompt-cache-bytes` 控制。
+
+客户端仍发送完整请求。响应的 `usage.prompt_tokens_details.cached_tokens` 显示实际复用数；
+动态时间、路径、工具定义、换行及分词边界变化可能使固定前缀不匹配。
+普通解码复用上游 LRU prompt cache；dSpark 同时保存 target KV 和 draft 上下文，
+每次匹配请求复制缓存，缓存按模型隔离，dSpark 的缓存不用于禁用 draft 的请求。
+启动模板未命中时，dSpark 也会保存真实请求的系统段及输入末 token 之前的状态，
+因此相同输入可从下次请求复用，跨窗口不需要共享会话 ID。
+对环境时间、窗口信息等尾部不同的请求，还会通过缓存索引查找共同 token 前缀，
+在下一次 prefill 到达该边界时保存成对状态，供后续窗口复用。首次发现的新边界
+仍需计算一次；共同前缀之后的变化内容及后缀必须重新计算。
+滑窗 KV 仅复用实际保存过的边界，不从已丢弃历史的状态任意回退。
+生成结束后，dSpark 还会保存已经执行前向并确认提交的回答前缀，包含 target KV
+和对应 draft 上下文。后续多轮请求按完整 token 前缀匹配，能复用上一轮输入及
+已经缓存的回答。最后一个已采样但尚未执行前向的 token 留到后续请求计算；
+被拒绝的草稿不会写入。客户端提前结束时只保存可验证的已提交前缀；若消费停在
+一批已接受 token 的中间，保留先前缓存，不从滑窗状态强行回退。
+客户端仍需发送完整历史，保持聊天模板、工具定义、思考内容及 token 边界一致；
+重新序列化造成的差异会减少命中。输入前缀和生成后状态都计入缓存条目数及字节数。
+普通与 dSpark 缓存共享 `--prompt-cache-size` 和 `--prompt-cache-bytes` 容量限制；
+`--prompt-cache-size -1` 取消条目数限制，例如
+`--prompt-cache-size -1 --prompt-cache-bytes 4294967296` 仅限制 KV 缓存总量为 4 GiB，
+达到字节上限时继续按上游缓存策略淘汰。正数限制条目数，0 禁用缓存（需配合
+`--skip-prefill` 跳过启动预热）；
+默认条目数仍沿用上游的 10。共同前缀从仍在缓存中的条目发现，不额外保留无限请求历史。
+`--skip-prefill` 仅跳过启动预热，仍保留请求期间的前缀缓存。
+服务日志中的 `dSpark prompt cache: input=... cached=... remaining=... startup_common=...`
+分别给出输入、实际复用、待计算及与启动模板共同前缀的 token 数。
+这是进程内缓存，每次重启重新预热，不写磁盘 KV 文件。
+
 未显式配置时，HTTP 保留原普通服务默认值：temperature=0、top_p=1、max_tokens=512、
 prefill_step_size=2048；请求省略 seed 时不重置随机状态；思考行为沿用模型模板。
 `--config` 及显式 CLI 参数可以覆盖这些默认值。HTTP 的旧参数校验和未知字段处理沿用

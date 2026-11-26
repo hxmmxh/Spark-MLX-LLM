@@ -1,6 +1,8 @@
 """Generation and loading adapters for the unchanged MLX-LM HTTP protocol."""
 
 import json
+import logging
+from threading import Event
 from dataclasses import replace
 from unittest.mock import patch
 
@@ -10,16 +12,20 @@ from mlx_lm import server as upstream
 from .config import GenerationConfig
 
 
+logger = logging.getLogger(__name__)
+
+
 class ModelProvider(upstream.ModelProvider):
     """Preserve upstream model/adapter selection and add Spark draft loading."""
 
-    def __init__(self, cli_args, *, config=None, load_options=None, served_model_name=None):
+    def __init__(self, cli_args, *, config=None, load_options=None, served_model_name=None, prefill_text=None):
         super().__init__(cli_args)
         self.spark_config = config or GenerationConfig()
         self.spark_config.validate_http()
         self.load_options = dict(load_options or {})
         self.served_model_name = served_model_name
         self.preloaded = None
+        self.prefill_text = prefill_text
         if served_model_name:
             self._model_map[served_model_name] = cli_args.model
 
@@ -84,6 +90,50 @@ class ModelProvider(upstream.ModelProvider):
 class ResponseGenerator(upstream.ResponseGenerator):
     """One generator interface; ordinary requests retain the upstream engine."""
 
+    def __init__(self, model_provider, prompt_cache):
+        self._ready = Event()
+        self._startup_error = None
+        self._spark_startup_prefix = None
+        if model_provider.cli_args.prompt_cache_size == -1:
+            # Preserve upstream's zero=disabled behavior; -1 removes only the
+            # entry-count limit, while the byte budget remains effective.
+            prompt_cache.max_size = float("inf")
+        budget = model_provider.cli_args.prompt_cache_bytes
+        if budget is not None:
+            prompt_cache.max_bytes = min(prompt_cache.max_bytes, max(0, budget))
+        logger.info(
+            "Prompt cache limits: entries=%s bytes=%d",
+            "unlimited" if prompt_cache.max_size == float("inf") else prompt_cache.max_size,
+            prompt_cache.max_bytes,
+        )
+        super().__init__(model_provider, prompt_cache)
+
+    def _generate(self):
+        try:
+            limit = self.model_provider.spark_config.cache_limit_mib
+            if self.model_provider.prefill_text is not None and limit is not None:
+                mx.set_cache_limit(limit * 1024**2)
+            self.model_provider.load_default()
+            if self.model_provider.prefill_text is not None:
+                import time
+                from ._server_prefill import prefill
+
+                start = time.perf_counter()
+                logger.info("Prefilling startup prefix...")
+                prefill(self, self.model_provider.prefill_text)
+                logger.info("Startup prefill took %.3f seconds", time.perf_counter() - start)
+        except Exception as error:
+            self._startup_error = error
+            return
+        finally:
+            self._ready.set()
+        super()._generate()
+
+    def wait_ready(self):
+        self._ready.wait()
+        if self._startup_error is not None:
+            raise self._startup_error
+
     def _tokenize(self, tokenizer, request, args):
         encoded = super()._tokenize(tokenizer, request, args)
         prompt = encoded[0]
@@ -139,6 +189,7 @@ class ResponseGenerator(upstream.ResponseGenerator):
         self._serve_spark(item, pair)
 
     def _serve_spark(self, item, pair):
+        from ._server_prefill import save_spark_prefix, spark_cache_key
         from .dspark.generation import TokenEvent, _generate_events
         from .dspark.metrics import GenerationResult
         from .dspark.sampling import SamplingOptions, TargetSamplingPolicy
@@ -150,7 +201,68 @@ class ResponseGenerator(upstream.ResponseGenerator):
             config = self.model_provider.spark_config.overlay(
                 getattr(request, "spark_overrides", {})
             )
-            prompt, _, _, initial = self._tokenize(tokenizer, request, args)
+            prompt, segments, segment_types, initial = self._tokenize(tokenizer, request, args)
+            model_key = self.model_provider.model_key
+            # Leave one input token for logits, including identical/shorter prompts.
+            cached, rest = self.prompt_cache.fetch_nearest_cache(
+                spark_cache_key(model_key), prompt[:-1],
+            )
+            cached_count = len(prompt) - 1 - len(rest) if cached else 0
+            boundaries = {len(prompt) - 1}
+            offset = 0
+            for segment, kind in zip(segments, segment_types):
+                offset += len(segment)
+                if kind == "system":
+                    boundaries.add(offset)
+
+            def common_length(left, right):
+                return next((i for i, (a, b) in enumerate(zip(left, right)) if a != b),
+                            min(len(left), len(right)))
+
+            # Some chat templates render an empty user message as a literal
+            # prefix, which upstream's mismatch-only segmentation misses.
+            if request.request_type == "chat" and "system" not in segment_types:
+                system_messages = []
+                for message in request.messages:
+                    if message["role"] != "system":
+                        break
+                    system_messages.append(message)
+                if system_messages:
+                    system_request = replace(request, messages=[
+                        *system_messages, {"role": "user", "content": ""},
+                    ])
+                    system_tokens = super()._tokenize(tokenizer, system_request, args)[0]
+                    boundaries.add(common_length(system_tokens, prompt))
+
+            # Use the byte-bounded upstream index to discover common prefixes;
+            # an unlimited entry count must not create an unbounded history list.
+            match = self.prompt_cache._trie.search(spark_cache_key(model_key), prompt)
+            boundaries.add(len(prompt) if match.exact is not None else match.common_prefix)
+            startup = self._spark_startup_prefix
+            startup_common = common_length(startup[1], prompt) if startup and startup[0] == model_key else 0
+            logger.info(
+                "dSpark prompt cache: input=%d cached=%d remaining=%d startup_common=%d/%d startup_expected=%s startup_actual=%s entries=%d bytes=%d",
+                len(prompt), cached_count, len(prompt) - cached_count, startup_common,
+                len(startup[1]) if startup else 0,
+                startup[1][startup_common] if startup and startup_common < len(startup[1]) else None,
+                prompt[startup_common] if startup and startup_common < len(prompt) else None,
+                len(self.prompt_cache), self.prompt_cache.nbytes,
+            )
+
+            def save_checkpoint(tokens, state, caches):
+                save_spark_prefix(
+                    self, tokens, state, caches,
+                    cache_type="user" if len(tokens) == len(prompt) - 1 else "system",
+                )
+
+            def save_generated_checkpoint(tokens, state, caches):
+                save_spark_prefix(self, tokens, state, caches, cache_type="user")
+                logger.info(
+                    "dSpark generated checkpoint: prompt=%d prefix=%d generated_kv=%d entries=%d bytes=%d",
+                    len(prompt), len(tokens), len(tokens) - len(prompt),
+                    len(self.prompt_cache), self.prompt_cache.nbytes,
+                )
+
             machine, sequences = self._make_state_machine(
                 self.model_provider.model_key, tokenizer, args.stop_words, initial
             )
@@ -158,6 +270,7 @@ class ResponseGenerator(upstream.ResponseGenerator):
             context = upstream.GenerationContext(
                 tokenizer.has_tool_calling, tokenizer.has_thinking,
                 tokenizer.tool_parser, sequences, prompt,
+                prompt_cache_count=cached_count,
             )
             queue.put(context)
             policy = TargetSamplingPolicy(
@@ -186,6 +299,10 @@ class ResponseGenerator(upstream.ResponseGenerator):
                 confidence_threshold=config.confidence_threshold,
                 apply_chat_template=False,
                 prompt_progress_callback=lambda processed, total: queue.put((processed, total)),
+                _prompt_cache=(prompt[:cached_count], cached[0].target, cached[0].draft) if cached else None,
+                _prefill_cache_boundaries=boundaries,
+                _prefill_cache_callback=save_checkpoint,
+                _generation_cache_callback=save_generated_checkpoint,
             )
             detokenizer = tokenizer.detokenizer
             detokenizer.reset()

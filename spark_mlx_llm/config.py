@@ -65,6 +65,9 @@ class GenerationConfig:
     reasoning_effort: str | None = "low"
     chat_template_kwargs: Mapping = field(default_factory=dict)
     prefill_step_size: int = 512
+    prefill_file: str | None = None
+    prefill_newlines: str = "lf"
+    skip_prefill: bool = False
     kv_bits: int | None = None
     kv_group_size: int = 32
     quantized_kv_start: int = 0
@@ -138,9 +141,20 @@ class GenerationConfig:
             ):
                 bounds = ">= 0" if name in ("temperature", "draft_temperature") else "between 0 and 1"
                 raise ValueError(f"{name} must be a finite number {bounds}")
-        for name in ("asynchronous_draft", "async_context", "compile_draft_chain", "apply_chat_template", "stop_at_eos", "clear_cache"):
+        for name in (
+            "asynchronous_draft", "async_context", "compile_draft_chain",
+            "apply_chat_template", "stop_at_eos", "clear_cache", "skip_prefill",
+        ):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be a boolean")
+        if self.prefill_file is not None and (
+            not isinstance(self.prefill_file, str) or not self.prefill_file.strip()
+        ):
+            raise ValueError("prefill_file must be a nonempty path string or None")
+        if self.prefill_newlines not in ("lf", "preserve"):
+            raise ValueError("prefill_newlines must be 'lf' or 'preserve'")
+        if self.skip_prefill and self.prefill_file is not None:
+            raise ValueError("prefill_file and skip_prefill cannot be used together")
         if not isinstance(self.chat_template_kwargs, Mapping):
             raise TypeError("chat_template_kwargs must be a JSON object")
         extras = dict(self.chat_template_kwargs)
@@ -299,6 +313,14 @@ class GenerationConfig:
                 help=f"{name} (default: {getattr(defaults, name)})",
             )
         cls.add_kv_arguments(parser, suppress_defaults=True)
+        if parser.prog.endswith(" server"):
+            group = parser.add_argument_group("startup prefix prefill")
+            group.add_argument("--prefill-file", default=argparse.SUPPRESS,
+                               help="Rendered UTF-8 prefix (default: bundled AStudio template)")
+            group.add_argument("--prefill-newlines", choices=("lf", "preserve"),
+                               default=argparse.SUPPRESS, help="Prefix newlines (default: lf)")
+            group.add_argument("--skip-prefill", action="store_true", default=argparse.SUPPRESS,
+                               help="Skip startup prefix prefill")
 
     @classmethod
     def from_args(cls, parser, args):

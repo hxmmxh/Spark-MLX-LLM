@@ -1,0 +1,32 @@
+{
+  "file": "template.txt",
+  "format": "model-rendered prompt prefix",
+  "bytes": 153551,
+  "sha256": "d3abffba678e9223df7e655f8da4428e38134da8eb8050e989695157ca6ba88e",
+  "default_prefill_newlines": "lf",
+  "reference_token_counts": {
+    "lf": 35818,
+    "preserve": 35818
+  },
+  "reference_model": "Spark-X2.6-4B-INT4",
+  "reference_validation": "20261126-astudio-real-http-template-refresh",
+  "reference_validation_scope": "Captured from the actual release HTTP request; rendered full token IDs and fixed-prefix token IDs verified exactly against the serving tokenizer.",
+  "captured_at": "2026-11-26T06:47:18.318448+00:00",
+  "source_request": "AStudio new conversation with user prompt 你好; environment contents, final user question and assistant prefix excluded",
+  "fixed_snapshot": {
+    "astudio_version": "3.7.1",
+    "astudio_build": "2d99aec86b9f",
+    "sites_skills_version": "1.0.18"
+  },
+  "excludes": [
+    "environment_context_contents",
+    "final_user_question",
+    "assistant_generation_prefix"
+  ],
+  "prefix_boundary": "</INSTRUCTIONS><environment_context>",
+  "captured_request_tokens": 35954,
+  "cached_prefix_tokens": 35817,
+  "remaining_tokens_for_captured_request": 137,
+  "captured_rendered_sha256": "a6e507b123bd034f70fc102be37ad8ebc3d83e6c2c33267f4f1192f55a149d4b",
+  "previous_template_sha256": "614bdd5b380380d1dc949eb41325db6d528f74db08bf79300413ae3675403426"
+}

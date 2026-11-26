@@ -1,0 +1,2 @@
+# Keep the captured prompt byte-exact for its startup integrity check.
+spark_mlx_llm/astudio_template/template.txt -text whitespace=-blank-at-eol,cr-at-eol

@@ -14,10 +14,12 @@ from mlx_lm import server as upstream
 from mlx_lm.models.cache import LRUPromptCache
 
 from ._server_backend import ModelProvider, ResponseGenerator
+from ._server_prefill import read_prefix
 from .config import GenerationConfig
 
 logger = logging.getLogger(__name__)
 _CONFIG_FIELDS = {item.name for item in fields(GenerationConfig)}
+_STARTUP_CONFIG = {"prefill_file", "prefill_newlines", "skip_prefill"}
 # These fields belong to the upstream request parser, including its validation,
 # aliases, defaults and chat-template semantics.
 _UPSTREAM_CONFIG = {
@@ -34,6 +36,8 @@ def print_upstream_help():
         except SystemExit as error:
             if error.code:
                 raise
+    print("\nSpark cache option: --prompt-cache-size -1 removes the entry-count limit; "
+          "use --prompt-cache-bytes to set the byte budget. Zero disables caching.")
 
 
 class APIHandler(upstream.APIHandler):
@@ -78,6 +82,8 @@ class APIHandler(upstream.APIHandler):
 
     def validate_model_parameters(self):
         GenerationConfig.reject_http_kv_options(self.body)
+        if _STARTUP_CONFIG.intersection(self.body):
+            raise ValueError("Prefix prefill options are only accepted at server startup")
         if "max_draft_tokens" in self.body:
             self.num_draft_tokens = self.body["max_draft_tokens"]
         super().validate_model_parameters()
@@ -171,7 +177,8 @@ def make_handler(
         getattr(model, "_spark_load_options", {}).get("model", "preloaded"),
         config, allowed_origins, **upstream_options,
     )
-    provider = ModelProvider(args, config=config, served_model_name=served_model_name)
+    provider = ModelProvider(args, config=config, served_model_name=served_model_name,
+                             prefill_text=read_prefix(config))
     provider.preloaded = (model, tokenizer)
     lock = Lock()
     generator = None
@@ -180,11 +187,16 @@ def make_handler(
         spark_config = config
 
         def __init__(self, *args, **kwargs):
+            self.prepare()
+            super().__init__(generator, *args, system_fingerprint="spark-mlx-llm", **kwargs)
+
+        @classmethod
+        def prepare(cls):
             nonlocal generator
             with lock:
                 if generator is None:
                     generator = ResponseGenerator(provider, LRUPromptCache(provider.cli_args.prompt_cache_size))
-            super().__init__(generator, *args, system_fingerprint="spark-mlx-llm", **kwargs)
+                generator.wait_ready()
 
         @classmethod
         def close(cls):
@@ -205,6 +217,7 @@ def serve(
     )
     try:
         with ThreadingHTTPServer((host, port), handler) as server:
+            handler.prepare()
             logger.info("Ready at http://%s:%s/v1", host, port)
             try:
                 server.serve_forever()
@@ -217,6 +230,9 @@ def serve(
 def serve_cli(args, config, remaining=()):
     """Delegate the CLI to upstream, forwarding all its existing server options."""
     config.validate_http()
+    if args.model is None and config.prefill_file is not None:
+        raise ValueError("--prefill-file requires --model")
+    prefill_text = read_prefix(config) if args.model is not None else None
     import mlx.core as mx
     from ._target_loader import _resolve_model_path, load as load_target
     from .registration import register_model
@@ -290,10 +306,15 @@ def serve_cli(args, config, remaining=()):
         return ModelProvider(
             cli_args, config=config, load_options=load_options,
             served_model_name=args.served_model_name,
+            prefill_text=prefill_text,
         )
 
     def run_http(host, port, generator):
-        return original_run_http(host, port, generator, handler_class=Handler)
+        try:
+            generator.wait_ready()
+            return original_run_http(host, port, generator, handler_class=Handler)
+        finally:
+            generator.stop_and_join()
 
     with patch.object(sys, "argv", argv), \
          patch.object(upstream, "load", ordinary_load), \

@@ -53,6 +53,22 @@ See the [inference guide](../inference.md) for all parameters and Python usage.
 
 ### Start the server
 
+The bundled snapshot was captured on 2026-11-26 from AStudio 3.7.1 / Sites 1.0.18; recapture after client tool or skill changes.
+
+With a default model, the service prefills the bundled AStudio prefix before accepting
+HTTP requests. Use `--prefill-file /path/to/prefix.txt` to replace it, or `--skip-prefill`
+to skip it. Newlines default to LF; `--prefill-newlines preserve` retains the file's
+newlines. Clients still send complete requests. Check
+`usage.prompt_tokens_details.cached_tokens` for the actual cache reuse count.
+dSpark also caches real request prefixes across connections. A repeated input can
+reuse its cached prefix on the next request; newly discovered shared boundaries must be computed once
+before later windows can reuse them. Check `dSpark prompt cache` in the server log.
+dSpark also saves committed target/draft state after generation for later chat turns.
+Send the complete history with matching token prefixes. Input and generated states
+both count toward cache limits; a sampled token without KV is computed on the next request.
+Use `--prompt-cache-size -1 --prompt-cache-bytes 4294967296` for a 4 GiB byte-only
+limit with no entry-count cap. To disable caching, use `--prompt-cache-size 0 --skip-prefill`.
+
 Recommended settings for the 4B target and its matching draft are listed explicitly below.
 Replace the two model paths with local paths, then keep this terminal running.
 
@@ -69,9 +85,17 @@ Replace the two model paths with local paths, then keep this terminal running.
     --max-draft-tokens 3 \
     --asynchronous-draft --async-context --compile-draft-chain \
     --seed 0 --prefill-step-size 512 \
+    --prefill-newlines lf --cache-limit-mib 256 \
+    --prompt-cache-size -1 --prompt-cache-bytes 4294967296 \
     --max-context-length 262144 \
     --max-tokens 262144
 ```
+
+`--prompt-cache-size -1` removes the entry-count cap; positive values cap entries,
+and omitting it keeps upstream's default of 10. One conversation can use several entries.
+`--prompt-cache-bytes` covers stored target/draft KV, including input and generated
+prefixes. `--cache-limit-mib` controls retained temporary allocator memory. Neither
+limit includes model weights.
 
 For 1.7B, replace both model paths and use a matching service name.
 For ordinary decoding, omit the draft-related options.

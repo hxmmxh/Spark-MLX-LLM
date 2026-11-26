@@ -1,6 +1,7 @@
 """Orchestrate request prefill, drafting, target verification, and cache commits."""
 
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import cache, partial
 
@@ -199,11 +200,15 @@ def _generate_events(
     target_policy=None,
     stop_sequences=(),
     prompt_progress_callback=None,
+    _prompt_cache=None,
+    _prefill_cache_boundaries=(),
+    _prefill_cache_callback=None,
+    _generation_cache_callback=None,
 ):
     """Yield TokenEvent values followed by exactly one GenerationResult.
 
     Token IDs include EOS when emitted; result.text excludes the trailing EOS.
-    Every call creates its own target and draft caches.
+    Every call owns its target and draft caches; HTTP may copy a prefilled prefix.
     max_new_tokens=None removes the output length limit and stops only at EOS.
     max_draft_tokens=None caps each round at 3 candidates, or fewer when the
     checkpoint has fewer prediction slots. Explicit values override this cap;
@@ -274,22 +279,34 @@ def _generate_events(
     caches = pair.drafter.make_context_cache() if speculative else []
     start = time.perf_counter()
     processed = 0
+    if _prompt_cache is not None:
+        prefix, cached_state, cached_draft = _prompt_cache
+        if len(prefix) >= len(ids) or ids[:len(prefix)] != prefix:
+            raise ValueError("Cached prefix must be a strict token prefix of the prompt")
+        state, caches = deepcopy((cached_state, cached_draft))
+        processed = len(prefix)
+        if state.offset != processed or any(cache.offset != processed for cache in caches):
+            raise ValueError("Cached prefix offsets do not match its tokens")
     if prompt_progress_callback is not None:
-        prompt_progress_callback(0, len(ids))
-    for chunk in _prompt_chunks(ids, prefill_chunk_size):
-        output = pair.target.run(
-            mx.array([chunk]),
-            state,
-            capture=speculative,
-            last_only=True,
-        )
-        state.finish()
-        if speculative:
-            pair.drafter.update_context(output.taps, caches)
-        mx.eval(output.logits, state.arrays(), cache_arrays(caches))
-        processed += len(chunk)
-        if prompt_progress_callback is not None:
-            prompt_progress_callback(processed, len(ids))
+        prompt_progress_callback(processed, len(ids))
+    boundaries = sorted({int(n) for n in _prefill_cache_boundaries if processed < n < len(ids)})
+    # Split at reusable boundaries before the sliding caches discard their history.
+    stops = sorted(set(boundaries) | {len(ids) - 1, len(ids)})
+    for stop in stops:
+        while processed < stop:
+            chunk = ids[processed:min(processed + prefill_chunk_size, stop)]
+            output = pair.target.run(
+                mx.array([chunk]), state, capture=speculative, last_only=True,
+            )
+            state.finish()
+            if speculative:
+                pair.drafter.update_context(output.taps, caches)
+            mx.eval(output.logits, state.arrays(), cache_arrays(caches))
+            processed += len(chunk)
+            if prompt_progress_callback is not None:
+                prompt_progress_callback(processed, len(ids))
+        if stop in boundaries and _prefill_cache_callback is not None:
+            _prefill_cache_callback(ids[:stop], state, caches)
     first_logprobs = (
         # Upstream generate_step builds processor history from the final
         # prefill token, then appends generated tokens on subsequent steps.
@@ -309,151 +326,173 @@ def _generate_events(
     rounds = target_steps = drafted_tokens = accepted_tokens = 0
     draft_length_stats = {}
     generation_start = time.perf_counter()
-    yield TokenEvent(pending, False, first_logprobs)
-    while (
-        max_new_tokens is None or len(result_ids) < max_new_tokens
-    ) and not _stopped(result_ids, eos, stop_sequences):
-        count = cap if speculative else 0
-        if max_new_tokens is not None:
-            count = min(count, max_new_tokens - len(result_ids) - 1)
-        proposal = None
-        draft = []
-        if count:
+    emitted_count = 0
+    cache_on_exit = False
+    try:
+        emitted_count += 1
+        yield TokenEvent(pending, False, first_logprobs)
+        while (
+            max_new_tokens is None or len(result_ids) < max_new_tokens
+        ) and not _stopped(result_ids, eos, stop_sequences):
+            count = cap if speculative else 0
+            if max_new_tokens is not None:
+                count = min(count, max_new_tokens - len(result_ids) - 1)
+            proposal = None
+            draft = []
+            if count:
+                t0 = time.perf_counter()
+                block = mx.array(
+                    [
+                        [pending]
+                        + [pair.drafter.config.mask_token_id]
+                        * (pair.drafter.config.block_size - 1)
+                    ]
+                )
+                hidden = pair.drafter.forward_cached(block, caches)
+                prediction = sample_draft(
+                    pair.drafter,
+                    hidden,
+                    block[:, 0],
+                    draft_options,
+                    count,
+                    require_proposal_probs=options.temperature > 0,
+                    require_confidence=confidence_threshold > 0,
+                    compile_chain=compile_draft_chain,
+                )
+                tokens = prediction.tokens
+                confidence = prediction.confidence
+                proposal = prediction.proposal_probs
+                evaluate_draft = (
+                    mx.async_eval
+                    if asynchronous_draft
+                    and not confidence_threshold
+                    and options.temperature > 0
+                    and mx.default_device() == mx.gpu
+                    else mx.eval
+                )
+                evaluate_draft(
+                    tokens,
+                    *([confidence] if confidence is not None else []),
+                    *([proposal] if proposal is not None else []),
+                )
+                if confidence_threshold:
+                    count = verification_length(
+                        confidence[0].tolist(), confidence_threshold, max_draft_tokens=count
+                    )
+                # Probabilistic verification consumes device token IDs directly;
+                # acceptance returns the final committed prefix in one host read.
+                draft = tokens[0, :count]
+                if options.temperature == 0:
+                    draft = draft.tolist()
+                if proposal is not None:
+                    proposal = proposal[0, :count]
+                draft_seconds += time.perf_counter() - t0
             t0 = time.perf_counter()
-            block = mx.array(
-                [
-                    [pending]
-                    + [pair.drafter.config.mask_token_id]
-                    * (pair.drafter.config.block_size - 1)
-                ]
-            )
-            hidden = pair.drafter.forward_cached(block, caches)
-            prediction = sample_draft(
-                pair.drafter,
-                hidden,
-                block[:, 0],
-                draft_options,
-                count,
-                require_proposal_probs=options.temperature > 0,
-                require_confidence=confidence_threshold > 0,
-                compile_chain=compile_draft_chain,
-            )
-            tokens = prediction.tokens
-            confidence = prediction.confidence
-            proposal = prediction.proposal_probs
-            evaluate_draft = (
-                mx.async_eval
-                if asynchronous_draft
-                and not confidence_threshold
-                and options.temperature > 0
-                and mx.default_device() == mx.gpu
-                else mx.eval
-            )
-            evaluate_draft(
-                tokens,
-                *([confidence] if confidence is not None else []),
-                *([proposal] if proposal is not None else []),
-            )
-            if confidence_threshold:
-                count = verification_length(
-                    confidence[0].tolist(), confidence_threshold, max_draft_tokens=count
-                )
-            # Probabilistic verification consumes device token IDs directly;
-            # acceptance returns the final committed prefix in one host read.
-            draft = tokens[0, :count]
-            if options.temperature == 0:
-                draft = draft.tolist()
-            if proposal is not None:
-                proposal = proposal[0, :count]
-            draft_seconds += time.perf_counter() - t0
-        t0 = time.perf_counter()
-        if sequential:
-            accepted, output, calls = _verify_sequential(
-                pair.target, pending, draft, state, speculative, eos
-            )
-        else:
-            verify_tokens = (
-                mx.concatenate(
-                    [mx.array([[pending]], dtype=mx.int32), draft[None, :]], axis=1
-                )
-                if isinstance(draft, mx.array)
-                else mx.array([[pending] + draft])
-            )
-            output = pair.target.run(verify_tokens, state, capture=speculative)
-            mx.eval(output.logits, state.arrays())
-            forward_end = time.perf_counter()
-            target_forward_seconds += forward_end - t0
-            calls = 1
-            verified_logprobs = None
-            target_probabilities = None
-            if target_policy is not None:
-                draft_ids = draft.tolist() if isinstance(draft, mx.array) else draft
-                verified_logprobs = [
-                    target_policy.logprobs(row, [*ids[-1:], *result_ids, *draft_ids[:i]])
-                    for i, row in enumerate(output.logits[0])
-                ]
-                if options.temperature > 0:
-                    target_probabilities = mx.stack([
-                        target_policy.probabilities(row) for row in verified_logprobs
-                    ])
-            if options.temperature == 0:
-                accepted = greedy_accept(
-                    draft, mx.argmax(
-                        mx.stack(verified_logprobs) if verified_logprobs is not None
-                        else output.logits[0], axis=-1
-                    ).tolist()
+            if sequential:
+                accepted, output, calls = _verify_sequential(
+                    pair.target, pending, draft, state, speculative, eos
                 )
             else:
-                accepted = sampled_accept(
-                    draft, proposal, output.logits[0], options,
-                    **({"target_probs": target_probabilities} if target_policy is not None else {}),
+                verify_tokens = (
+                    mx.concatenate(
+                        [mx.array([[pending]], dtype=mx.int32), draft[None, :]], axis=1
+                    )
+                    if isinstance(draft, mx.array)
+                    else mx.array([[pending] + draft])
                 )
-            acceptance_seconds += time.perf_counter() - forward_end
-        verify_seconds += time.perf_counter() - t0
-        committed = list(accepted.tokens)
-        stop_at = next(
-            (i + 1 for i in range(len(committed))
-             if _stopped([*result_ids, *committed[:i + 1]], eos, stop_sequences)),
-            len(committed)
-        )
-        committed = committed[:stop_at]
-        emitted_accepted = min(accepted.num_accepted, len(committed))
-        keep = min(1 + emitted_accepted, output.logits.shape[1])
-        if not sequential:
-            commit_start = time.perf_counter()
-            state.finish(keep)
-            target_commit_seconds += time.perf_counter() - commit_start
-        if speculative:
-            t0 = time.perf_counter()
-            pair.drafter.update_context(
-                tuple(tap[:, :keep] for tap in output.taps), caches
+                output = pair.target.run(verify_tokens, state, capture=speculative)
+                mx.eval(output.logits, state.arrays())
+                forward_end = time.perf_counter()
+                target_forward_seconds += forward_end - t0
+                calls = 1
+                verified_logprobs = None
+                target_probabilities = None
+                if target_policy is not None:
+                    draft_ids = draft.tolist() if isinstance(draft, mx.array) else draft
+                    verified_logprobs = [
+                        target_policy.logprobs(row, [*ids[-1:], *result_ids, *draft_ids[:i]])
+                        for i, row in enumerate(output.logits[0])
+                    ]
+                    if options.temperature > 0:
+                        target_probabilities = mx.stack([
+                            target_policy.probabilities(row) for row in verified_logprobs
+                        ])
+                if options.temperature == 0:
+                    accepted = greedy_accept(
+                        draft, mx.argmax(
+                            mx.stack(verified_logprobs) if verified_logprobs is not None
+                            else output.logits[0], axis=-1
+                        ).tolist()
+                    )
+                else:
+                    accepted = sampled_accept(
+                        draft, proposal, output.logits[0], options,
+                        **({"target_probs": target_probabilities} if target_policy is not None else {}),
+                    )
+                acceptance_seconds += time.perf_counter() - forward_end
+            verify_seconds += time.perf_counter() - t0
+            committed = list(accepted.tokens)
+            stop_at = next(
+                (i + 1 for i in range(len(committed))
+                 if _stopped([*result_ids, *committed[:i + 1]], eos, stop_sequences)),
+                len(committed)
             )
-            evaluate_context = mx.async_eval if asynchronous_context else mx.eval
-            evaluate_context(cache_arrays(caches))
-            if any(cache.offset != state.offset for cache in caches):
-                raise RuntimeError("Draft and target committed contexts diverged")
-            context_seconds += time.perf_counter() - t0
-        rounds += 1
-        target_steps += calls
-        drafted_tokens += len(draft)
-        accepted_tokens += emitted_accepted
-        if mode == "dspark":
-            stats = draft_length_stats.setdefault(len(draft), DraftLengthStats())
-            stats.add(DraftLengthStats(1, len(draft), emitted_accepted))
-        result_ids.extend(committed)
-        pending = committed[-1]
-        for i, token in enumerate(committed):
-            yield TokenEvent(
-                token, i < emitted_accepted,
-                verified_logprobs[i] if target_policy is not None else None,
-            )
-    if asynchronous_context:
-        # Include the last outstanding cache update in the same decode timing
-        # scope as the synchronous path, including early stop and token caps.
-        context_start = time.perf_counter()
-        mx.eval(cache_arrays(caches))
-        context_seconds += time.perf_counter() - context_start
-    duration = time.perf_counter() - generation_start
+            committed = committed[:stop_at]
+            emitted_accepted = min(accepted.num_accepted, len(committed))
+            keep = min(1 + emitted_accepted, output.logits.shape[1])
+            if not sequential:
+                commit_start = time.perf_counter()
+                state.finish(keep)
+                target_commit_seconds += time.perf_counter() - commit_start
+            if speculative:
+                t0 = time.perf_counter()
+                pair.drafter.update_context(
+                    tuple(tap[:, :keep] for tap in output.taps), caches
+                )
+                evaluate_context = mx.async_eval if asynchronous_context else mx.eval
+                evaluate_context(cache_arrays(caches))
+                if any(cache.offset != state.offset for cache in caches):
+                    raise RuntimeError("Draft and target committed contexts diverged")
+                context_seconds += time.perf_counter() - t0
+            rounds += 1
+            target_steps += calls
+            drafted_tokens += len(draft)
+            accepted_tokens += emitted_accepted
+            if mode == "dspark":
+                stats = draft_length_stats.setdefault(len(draft), DraftLengthStats())
+                stats.add(DraftLengthStats(1, len(draft), emitted_accepted))
+            result_ids.extend(committed)
+            pending = committed[-1]
+            for i, token in enumerate(committed):
+                emitted_count += 1
+                yield TokenEvent(
+                    token, i < emitted_accepted,
+                    verified_logprobs[i] if target_policy is not None else None,
+                )
+        cache_on_exit = True
+    except GeneratorExit:
+        cache_on_exit = True
+        raise
+    finally:
+        if asynchronous_context:
+            # Flush also when a consumer closes the stream before the result.
+            context_start = time.perf_counter()
+            mx.eval(cache_arrays(caches))
+            context_seconds += time.perf_counter() - context_start
+        duration = time.perf_counter() - generation_start
+        if _generation_cache_callback is not None and cache_on_exit:
+            # A sampled pending token has no KV yet. A partly consumed accepted
+            # batch may have KV beyond the emitted prefix; sliding KV cannot be
+            # rewound to that point, so leave the earlier checkpoints intact.
+            offset = state.offset
+            if (
+                len(ids) <= offset <= len(ids) + emitted_count
+                and all(cache.offset == offset and not cache.pending for cache in caches)
+                and all(not cache.pending for cache in state.layers)
+            ):
+                mx.eval(state.arrays(), cache_arrays(caches))
+                tokens = [*ids, *result_ids[:emitted_count]][:offset]
+                _generation_cache_callback(tokens, state, caches)
     visible = result_ids[:-1] if result_ids[-1] in eos else result_ids
     for sequence in stop_sequences:
         if len(visible) >= len(sequence) and tuple(visible[-len(sequence):]) == sequence:
