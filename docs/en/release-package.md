@@ -53,11 +53,19 @@ See the [inference guide](../inference.md) for all parameters and Python usage.
 
 ### Start the server
 
-The bundled snapshot was captured on 2026-11-26 from AStudio 3.7.1 / Sites 1.0.18; recapture after client tool or skill changes.
+The bundled assets match the Vulkan `d17ffbbfb` capture from 2026-11-26 and were
+re-rendered byte-for-byte with the MLX chat template. Recapture after client tool,
+skill or fixed workspace-instruction changes.
 
-With a default model, the service prefills the bundled AStudio prefix before accepting
-HTTP requests. Use `--prefill-file /path/to/prefix.txt` to replace it, or `--skip-prefill`
-to skip it. Newlines default to LF; `--prefill-newlines preserve` retains the file's
+With a default model, startup first warms the title prefix, then three cumulative
+main prefixes: System 1, System 1 + System 2, and both systems + fixed User 1.
+The two later main stages continue from the preceding state. For the 4B model,
+their input lengths are 26,320 / 34,795 / 36,451 tokens; the title has 2,388.
+Each checkpoint leaves its last token for request logits. All warmup completes
+before accepting HTTP requests. Changed skills or workspace instructions can match
+a shorter stage. Use `--single-prefill` to warm only the complete main prefix,
+`--prefill-file /path/to/prefix.txt` for one custom prefix, or `--skip-prefill`
+to skip warmup. Newlines default to LF; `--prefill-newlines preserve` retains the file's
 newlines. Clients still send complete requests. Check
 `usage.prompt_tokens_details.cached_tokens` for the actual cache reuse count.
 dSpark also caches real request prefixes across connections. A repeated input can
@@ -66,7 +74,14 @@ before later windows can reuse them. Check `dSpark prompt cache` in the server l
 dSpark also saves committed target/draft state after generation for later chat turns.
 Send the complete history with matching token prefixes. Input and generated states
 both count toward cache limits; a sampled token without KV is computed on the next request.
-Use `--prompt-cache-size -1 --prompt-cache-bytes 4294967296` for a 4 GiB byte-only
+The title and staged startup checkpoints share these limits too. Startup logs report
+`reused` and `computed` tokens for each stage and warn if capacity evicts a dSpark
+checkpoint before startup finishes. Increase the budget or use `--single-prefill`.
+For the current 4B floating-point KV layout, startup checkpoints are estimated at
+3.73 GiB in total; keeping one full input and generated checkpoint as well needs
+about 6.4 GiB. The example therefore uses an 8 GiB cache budget. Check runtime logs
+for actual usage.
+Use `--prompt-cache-size -1 --prompt-cache-bytes 8589934592` for an 8 GiB byte-only
 limit with no entry-count cap. To disable caching, use `--prompt-cache-size 0 --skip-prefill`.
 
 Recommended settings for the 4B target and its matching draft are listed explicitly below.
@@ -86,7 +101,7 @@ Replace the two model paths with local paths, then keep this terminal running.
     --asynchronous-draft --async-context --compile-draft-chain \
     --seed 0 --prefill-step-size 512 \
     --prefill-newlines lf --cache-limit-mib 256 \
-    --prompt-cache-size -1 --prompt-cache-bytes 4294967296 \
+    --prompt-cache-size -1 --prompt-cache-bytes 8589934592 \
     --max-context-length 262144 \
     --max-tokens 262144
 ```

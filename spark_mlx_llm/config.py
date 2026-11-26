@@ -68,6 +68,7 @@ class GenerationConfig:
     prefill_file: str | None = None
     prefill_newlines: str = "lf"
     skip_prefill: bool = False
+    single_prefill: bool = False
     kv_bits: int | None = None
     kv_group_size: int = 32
     quantized_kv_start: int = 0
@@ -143,7 +144,7 @@ class GenerationConfig:
                 raise ValueError(f"{name} must be a finite number {bounds}")
         for name in (
             "asynchronous_draft", "async_context", "compile_draft_chain",
-            "apply_chat_template", "stop_at_eos", "clear_cache", "skip_prefill",
+            "apply_chat_template", "stop_at_eos", "clear_cache", "skip_prefill", "single_prefill",
         ):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be a boolean")
@@ -321,6 +322,8 @@ class GenerationConfig:
                                default=argparse.SUPPRESS, help="Prefix newlines (default: lf)")
             group.add_argument("--skip-prefill", action="store_true", default=argparse.SUPPRESS,
                                help="Skip startup prefix prefill")
+            group.add_argument("--single-prefill", action="store_true", default=argparse.SUPPRESS,
+                               help="Warm only the full main prefix instead of the title and three main stages")
 
     @classmethod
     def from_args(cls, parser, args):

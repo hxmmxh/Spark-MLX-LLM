@@ -18,7 +18,7 @@ import pytest
 from spark_mlx_llm import GenerationConfig, cli
 from spark_mlx_llm import server
 from spark_mlx_llm._server_backend import ModelProvider, ResponseGenerator
-from spark_mlx_llm._server_prefill import read_prefix
+from spark_mlx_llm._server_prefill import PrefillStage, read_prefix, read_prefixes, spark_cache_key
 
 
 @pytest.fixture(autouse=True)
@@ -302,7 +302,7 @@ def test_startup_prefill_respects_a_disabled_draft(prefill_model, tmp_path):
     assert result["usage"]["prompt_tokens_details"]["cached_tokens"] == 5
 
 
-@pytest.mark.parametrize("setting", ["prefill_file", "skip_prefill", "prefill_newlines"])
+@pytest.mark.parametrize("setting", ["prefill_file", "skip_prefill", "prefill_newlines", "single_prefill"])
 def test_startup_options_cannot_be_changed_by_http(prefill_model, setting):
     model, tokenizer = prefill_model(False)
     with running_server(model, tokenizer) as connection:
@@ -652,6 +652,7 @@ def test_custom_prefix_keeps_whitespace_and_special_markers(tmp_path):
     ({"prefill_file": ""}, "nonempty"),
     ({"prefill_newlines": "crlf"}, "prefill_newlines"),
     ({"skip_prefill": 1}, "boolean"),
+    ({"single_prefill": 1}, "boolean"),
     ({"prefill_file": "a", "skip_prefill": True}, "cannot be used together"),
 ])
 def test_invalid_startup_config(options, message):
@@ -723,3 +724,171 @@ def test_cli_failed_prefill_never_starts_http(monkeypatch):
     with pytest.raises(SystemExit):
         cli.main(["server", "--model", "tiny"])
     assert closed == [True]
+
+
+@pytest.fixture
+def startup_stages():
+    return (
+        PrefillStage("title", "202122232425"),
+        PrefillStage("system1", "010203040506"),
+        PrefillStage("system1_system2", "01020304050607080910"),
+        PrefillStage("system1_system2_user1_fixed", "0102030405060708091011121314"),
+    )
+
+
+@pytest.mark.parametrize("draft", [False, True])
+def test_startup_stages_only_compute_the_main_suffix_and_keep_independent_snapshots(
+    prefill_model, startup_stages, monkeypatch, draft,
+):
+    model, tokenizer = prefill_model(draft)
+    seen = []
+    if draft:
+        target = model._spark_runtime.target
+        original = target.run
+        def run(tokens, *args, **kwargs):
+            seen.extend(tokens[0].tolist())
+            return original(tokens, *args, **kwargs)
+        monkeypatch.setattr(target, "run", run)
+    else:
+        original = type(model).__call__
+        def run(self, tokens, *args, **kwargs):
+            seen.extend(tokens[0].tolist())
+            return original(self, tokens, *args, **kwargs)
+        monkeypatch.setattr(type(model), "__call__", run)
+    config = replace(GenerationConfig.http_defaults(), prefill_step_size=3)
+    provider = ModelProvider(server._namespace("tiny", config, ("*",), prompt_cache_size=-1),
+                             config=config, prefill_text=startup_stages[-1].text,
+                             prefill_stages=startup_stages)
+    provider.preloaded = model, tokenizer
+    cache = LRUPromptCache()
+    generator = ResponseGenerator(provider, cache)
+    try:
+        generator.wait_ready()
+        assert seen == [20, 21, 22, 23, 24, *range(1, 14)]
+        assert len(cache) == 4
+        assert cache.stats_by_type()["system"]["n_sequences"] == (3 if draft else 4)
+        key = spark_cache_key(provider.model_key) if draft else provider.model_key
+        for stage in startup_stages:
+            prefix = tokenizer.encode(stage.text)[:-1]
+            snapshot, remaining = cache.fetch_nearest_cache(key, prefix)
+            assert snapshot and not remaining
+            layers = (*snapshot[0].target.layers, *snapshot[0].draft) if draft else snapshot
+            assert all(layer.offset == len(prefix) for layer in layers)
+    finally:
+        generator.stop_and_join()
+
+
+@pytest.mark.parametrize("draft", [False, True])
+@pytest.mark.parametrize("stream", [False, True])
+def test_startup_stage_fallback_and_title_match_cold_output(
+    prefill_model, startup_stages, monkeypatch, draft, stream,
+):
+    model, tokenizer = prefill_model(draft)
+    monkeypatch.setattr(server, "read_prefixes", lambda config: () if config.skip_prefill else startup_stages)
+    cases = [
+        (startup_stages[3].text + "1516", 13),
+        (startup_stages[2].text + "1718", 9),
+        (startup_stages[1].text + "1918", 5),
+        (startup_stages[0].text + "2627", 5),
+    ]
+    options = {"max_tokens": 4, "temperature": 0., "seed": 23, "stream": stream}
+    if stream:
+        options["stream_options"] = {"include_usage": True}
+    config = replace(GenerationConfig.http_defaults(), prefill_step_size=3)
+    results = []
+    with running_server(model, tokenizer, config=config, prompt_cache_size=30) as connection:
+        for prompt, expected in cases:
+            connection.close()
+            warm = post(connection, "/v1/completions", {**options, "prompt": prompt})
+            assert warm[-1]["usage"]["prompt_tokens_details"]["cached_tokens"] == expected
+            results.append(warm)
+    for (prompt, _), warm in zip(cases, results):
+        with running_server(model, tokenizer) as connection:
+            cold = post(connection, "/v1/completions", {**options, "prompt": prompt})
+        assert [packet["choices"] for packet in warm] == [packet["choices"] for packet in cold]
+
+
+def test_non_nested_stages_fail_before_any_model_forward(prefill_model, monkeypatch):
+    model, tokenizer = prefill_model(True)
+    monkeypatch.setattr(model._spark_runtime.target, "run", lambda *a, **k: pytest.fail("Model ran"))
+    stages = (PrefillStage("system1", "0102030405"), PrefillStage("system1_system2", "0102030607"))
+    config = GenerationConfig.http_defaults()
+    provider = ModelProvider(server._namespace("tiny", config, ("*",)), config=config,
+                             prefill_text=stages[-1].text, prefill_stages=stages)
+    provider.preloaded = model, tokenizer
+    generator = ResponseGenerator(provider, LRUPromptCache())
+    try:
+        with pytest.raises(ValueError, match="nested token prefixes"):
+            generator.wait_ready()
+    finally:
+        generator.stop_and_join()
+
+
+def test_staged_startup_reports_checkpoints_evicted_by_count_limit(
+    prefill_model, startup_stages, caplog,
+):
+    model, tokenizer = prefill_model(True)
+    config = GenerationConfig.http_defaults()
+    provider = ModelProvider(server._namespace("tiny", config, ("*",), prompt_cache_size=1),
+                             config=config, prefill_text=startup_stages[-1].text,
+                             prefill_stages=startup_stages)
+    provider.preloaded = model, tokenizer
+    cache = LRUPromptCache(1)
+    generator = ResponseGenerator(provider, cache)
+    try:
+        generator.wait_ready()
+        assert len(cache) == 1
+        assert "Startup prefill retained 1/4 checkpoints" in caplog.text
+    finally:
+        generator.stop_and_join()
+
+
+def test_default_plan_uses_raw_byte_cuts_and_single_and_custom_modes(monkeypatch, tmp_path):
+    config = GenerationConfig.http_defaults()
+    monkeypatch.chdir(tmp_path)
+    stages = read_prefixes(config)
+    assert [stage.name for stage in stages] == ["title", "system1", "system1_system2", "system1_system2_user1_fixed"]
+    assert stages[2].text.startswith(stages[1].text)
+    assert stages[3].text.startswith(stages[2].text)
+    assert stages[0].text.endswith("<environment_context>")
+    assert stages[3].text.endswith("</INSTRUCTIONS><environment_context>")
+    single = read_prefixes(replace(config, single_prefill=True))
+    assert single == (PrefillStage("main", stages[-1].text),)
+    path = tmp_path / "custom.txt"
+    path.write_bytes(b"custom\r\nprefix")
+    assert read_prefixes(replace(config, prefill_file=str(path))) == (PrefillStage("main", "custom\nprefix"),)
+    assert not read_prefixes(replace(config, skip_prefill=True))
+
+
+@pytest.mark.parametrize("corrupt", ["stage_order", "stage_role", "title_hash", "title_boundary"])
+def test_staged_asset_corruption_is_rejected_before_loading(monkeypatch, tmp_path, corrupt):
+    from spark_mlx_llm import _server_prefill
+    import shutil
+    directory = tmp_path / "astudio_template"
+    shutil.copytree(Path(_server_prefill.__file__).with_name("astudio_template"), directory)
+    path = directory / "template-info.json"
+    info = json.loads(path.read_text())
+    if corrupt == "stage_order":
+        info["main_stages"][1]["bytes"] = info["main_stages"][0]["bytes"]
+    elif corrupt == "stage_role":
+        info["main_stages"][0]["bytes"] += 1
+    elif corrupt == "title_hash":
+        (directory / "title.txt").write_text("corrupted")
+    else:
+        info["title"]["prefix_boundary"] = "incorrect boundary"
+    path.write_text(json.dumps(info))
+    monkeypatch.setattr(_server_prefill, "__file__", str(tmp_path / "_server_prefill.py"))
+    with pytest.raises(ValueError, match="boundaries|boundary|does not match"):
+        read_prefixes(GenerationConfig.http_defaults())
+
+
+def test_cli_single_prefill_is_consumed_before_upstream(monkeypatch):
+    from mlx_lm import server as upstream
+    def main():
+        import sys
+        assert "--single-prefill" not in sys.argv
+        provider = upstream.ModelProvider(server._namespace("tiny", GenerationConfig.http_defaults(), ("*",)))
+        assert [stage.name for stage in provider.prefill_stages] == ["main"]
+        assert provider.prefill_text.endswith("<environment_context>")
+    monkeypatch.setattr(upstream, "main", main)
+    assert cli.main(["server", "--model", "tiny", "--single-prefill"]) == 0

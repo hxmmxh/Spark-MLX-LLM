@@ -29,14 +29,18 @@ low 思考，两项异步均开启。结果包含实际参数及 prompt 哈希�
       --asynchronous-draft --async-context --compile-draft-chain \
       --seed 0 --prefill-step-size 512 \
       --prefill-newlines lf --cache-limit-mib 256 \
-      --prompt-cache-size -1 --prompt-cache-bytes 4294967296 \
+      --prompt-cache-size -1 --prompt-cache-bytes 8589934592 \
       --max-context-length 262144 --max-tokens 262144
 
 在另一个终端测试 HTTP 请求：
-  指定模型时默认预热包内 AStudio 固定前缀，完成后再接收请求。
+  指定模型时先预热标题，再保存 System 1、System 1+2、System 1+2+User 1 固定部分。
+  后两档复用前一档；4B 参考输入为 26320/34795/36451 token，标题为 2388 token。
+  每档留一个 token 供请求计算 logits，全部预热完成后再接收请求。
   --prefill-file FILE 替换前缀；--skip-prefill 跳过；--prefill-newlines preserve 保留换行。
+  --single-prefill 只预热完整主前缀；自定义 --prefill-file 也使用单段方式。
+  标题和三个档位共用 KV 缓存预算，容量不足时仍可能淘汰启动快照。
   客户端仍发送完整请求，usage.prompt_tokens_details.cached_tokens 显示实际缓存命中数。
-  上面的 -1 取消条目数限制，仅按 4 GiB KV 总量淘汰；正数限制条目数，省略时为 10。
+  上面的 -1 取消条目数限制，仅按 8 GiB KV 总量淘汰；正数限制条目数，省略时为 10。
   dSpark 保存输入前缀及已提交回答的 target KV/draft 上下文，发送完整历史可复用多轮缓存。
   --prompt-cache-size 0 --skip-prefill 禁用缓存并跳过启动预热。
   curl --fail-with-body http://127.0.0.1:8080/v1/chat/completions \

@@ -14,12 +14,12 @@ from mlx_lm import server as upstream
 from mlx_lm.models.cache import LRUPromptCache
 
 from ._server_backend import ModelProvider, ResponseGenerator
-from ._server_prefill import read_prefix
+from ._server_prefill import read_prefixes
 from .config import GenerationConfig
 
 logger = logging.getLogger(__name__)
 _CONFIG_FIELDS = {item.name for item in fields(GenerationConfig)}
-_STARTUP_CONFIG = {"prefill_file", "prefill_newlines", "skip_prefill"}
+_STARTUP_CONFIG = {"prefill_file", "prefill_newlines", "skip_prefill", "single_prefill"}
 # These fields belong to the upstream request parser, including its validation,
 # aliases, defaults and chat-template semantics.
 _UPSTREAM_CONFIG = {
@@ -177,8 +177,9 @@ def make_handler(
         getattr(model, "_spark_load_options", {}).get("model", "preloaded"),
         config, allowed_origins, **upstream_options,
     )
+    stages = read_prefixes(config)
     provider = ModelProvider(args, config=config, served_model_name=served_model_name,
-                             prefill_text=read_prefix(config))
+                             prefill_text=stages[-1].text if stages else None, prefill_stages=stages)
     provider.preloaded = (model, tokenizer)
     lock = Lock()
     generator = None
@@ -232,7 +233,8 @@ def serve_cli(args, config, remaining=()):
     config.validate_http()
     if args.model is None and config.prefill_file is not None:
         raise ValueError("--prefill-file requires --model")
-    prefill_text = read_prefix(config) if args.model is not None else None
+    prefill_stages = read_prefixes(config) if args.model is not None else ()
+    prefill_text = prefill_stages[-1].text if prefill_stages else None
     import mlx.core as mx
     from ._target_loader import _resolve_model_path, load as load_target
     from .registration import register_model
@@ -307,6 +309,7 @@ def serve_cli(args, config, remaining=()):
             cli_args, config=config, load_options=load_options,
             served_model_name=args.served_model_name,
             prefill_text=prefill_text,
+            prefill_stages=prefill_stages,
         )
 
     def run_http(host, port, generator):

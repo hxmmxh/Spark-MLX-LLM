@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ModelProvider(upstream.ModelProvider):
     """Preserve upstream model/adapter selection and add Spark draft loading."""
 
-    def __init__(self, cli_args, *, config=None, load_options=None, served_model_name=None, prefill_text=None):
+    def __init__(self, cli_args, *, config=None, load_options=None, served_model_name=None, prefill_text=None, prefill_stages=()):
         super().__init__(cli_args)
         self.spark_config = config or GenerationConfig()
         self.spark_config.validate_http()
@@ -26,6 +26,7 @@ class ModelProvider(upstream.ModelProvider):
         self.served_model_name = served_model_name
         self.preloaded = None
         self.prefill_text = prefill_text
+        self.prefill_stages = prefill_stages
         if served_model_name:
             self._model_map[served_model_name] = cli_args.model
 
@@ -120,7 +121,7 @@ class ResponseGenerator(upstream.ResponseGenerator):
 
                 start = time.perf_counter()
                 logger.info("Prefilling startup prefix...")
-                prefill(self, self.model_provider.prefill_text)
+                prefill(self, self.model_provider.prefill_text, stages=self.model_provider.prefill_stages)
                 logger.info("Startup prefill took %.3f seconds", time.perf_counter() - start)
         except Exception as error:
             self._startup_error = error

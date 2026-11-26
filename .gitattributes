@@ -1,2 +1,3 @@
-# Keep the captured prompt byte-exact for its startup integrity check.
+# Keep captured prompts byte-exact for their startup integrity checks.
 spark_mlx_llm/astudio_template/template.txt -text whitespace=-blank-at-eol,cr-at-eol
+spark_mlx_llm/astudio_template/title.txt -text whitespace=-blank-at-eol,cr-at-eol

@@ -50,9 +50,13 @@ cd spark-mlx-0.1.2-macos26-arm64
 
 ### 启动服务
 
-指定模型时，服务默认预热包内 AStudio 固定前缀，完成后再开始接收 HTTP 请求。
+指定模型时，服务默认先预热标题，再依次保存 System 1、System 1 + System 2、
+System 1 + System 2 + User 1 固定部分三个累计主前缀，完成后再接收 HTTP 请求。
 默认模板随发布包安装，路径不依赖当前工作目录，无需另行指定文件。
-当前模板捕获于 2026-11-26，来自 AStudio 3.7.1 / Sites 1.0.18；客户端工具或技能配置变化后需要重新捕获。
+当前模板与 2026-11-26 Vulkan `d17ffbbfb` 的捕获资源一致，已用 MLX 模板重新渲染核对。
+4B 模型的主前缀输入为 26,320 / 34,795 / 36,451 token，标题为 2,388 token；
+每档留一个 token 供请求计算 logits。后两档接续前一档，工具、技能或固定工作区说明
+变化后可匹配较短档位；配置变化时仍应重新捕获最新模板。
 终端依次显示 `Prefill complete: ... input tokens, ... cached tokens` 和
 `Starting httpd ...` 后，再连接客户端。
 客户端继续发送完整请求；实际命中数见 `usage.prompt_tokens_details.cached_tokens`。
@@ -74,7 +78,7 @@ cd spark-mlx-0.1.2-macos26-arm64
     --asynchronous-draft --async-context --compile-draft-chain \
     --seed 0 --prefill-step-size 512 \
     --prefill-newlines lf --cache-limit-mib 256 \
-    --prompt-cache-size -1 --prompt-cache-bytes 4294967296 \
+    --prompt-cache-size -1 --prompt-cache-bytes 8589934592 \
     --max-context-length 262144 \
     --max-tokens 262144
 ```
@@ -86,6 +90,7 @@ cd spark-mlx-0.1.2-macos26-arm64
 | `--prefill-file /path/to/prefix.txt` | 使用自己的 UTF-8 已渲染前缀，保留特殊消息标记和空白，不重复套聊天模板。省略时使用包内默认模板。 |
 | `--prefill-newlines lf` | 将 CRLF/CR 规范为 LF，默认开启；改为 `--prefill-newlines preserve` 可保留文件原换行。 |
 | `--skip-prefill` | 跳过启动预热，不能与 `--prefill-file` 同时使用。 |
+| `--single-prefill` | 只预热完整主前缀，不预热标题和保存两个中间档位。自定义 `--prefill-file` 也使用单段方式。 |
 | `--cache-limit-mib 256` | 启动预热时设置 MLX 分配器的临时缓存上限，单位 MiB；KV 前缀容量由 `--prompt-cache-bytes` 控制。 |
 
 例如，自定义前缀时追加 `--prefill-file /path/to/prefix.txt`；跳过预热时追加
@@ -96,13 +101,18 @@ dSpark 也会缓存真实请求的前缀，供新窗口复用；动态窗口信�
 日志中的 `dSpark prompt cache: ... cached=... remaining=...` 可确认实际命中。
 生成后也会缓存已提交的回答 KV 和 draft 上下文，后续发送完整历史可复用多轮前缀；
 输入与生成后状态均占用缓存容量，未执行前向的末 token 仍需在下一轮计算。
+标题和三个启动快照同样计入容量；预算不足时可能淘汰较早的档位。
+按当前 4B 浮点 KV 布局估算，启动快照共约 3.73 GiB；再保留一组完整请求及回答
+快照约需 6.4 GiB，因此示例使用 8 GiB。实际占用以服务日志为准。
+`Startup prefill stage ... reused=... computed=...` 显示每档计算量；若启动结束时
+未保留全部 dSpark 档位，日志会给出提示，可增加缓存预算或使用 `--single-prefill`。
 
-上面的命令只限制 KV 总容量为 4 GiB，不限制条目数。容量参数的含义如下：
+上面的命令只限制 KV 总容量为 8 GiB，不限制条目数。容量参数的含义如下：
 
 | 参数 | 用法 |
 |---|---|
 | `--prompt-cache-size -1` | 不限制条目数；正数限制条目数，省略时沿用上游默认的 10 条。一个对话可以占用多个条目。 |
-| `--prompt-cache-bytes 4294967296` | KV 总容量上限为 4 GiB，包含输入前缀、已提交的回答 KV 和 draft 上下文；超出后按缓存策略淘汰。 |
+| `--prompt-cache-bytes 8589934592` | KV 总容量上限为 8 GiB，包含输入前缀、已提交的回答 KV 和 draft 上下文；超出后按缓存策略淘汰。 |
 | `--prompt-cache-size 0 --skip-prefill` | 禁用请求缓存，同时跳过需要缓存条目的启动预热。 |
 
 `--prompt-cache-bytes` 控制 KV 缓存池容量；`--cache-limit-mib` 控制 MLX 分配器

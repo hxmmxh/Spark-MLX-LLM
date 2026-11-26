@@ -159,14 +159,19 @@ The Python API and generation/chat/benchmark CLI retain KV quantization support.
 
 ### 启动时预先 prefill 固定前缀
 
-指定 `--model` 时，HTTP 服务默认读取包内 `astudio_template/template.txt`，
-完成预热后才开始接收请求。模板来自最近一次 AStudio 真实请求的固定前缀，
-捕获时间、客户端/技能版本、SHA-256 和验证 token 数见同目录 `template-info.json`；
+指定 `--model` 时，HTTP 服务默认先预热包内 `astudio_template/title.txt`，
+再按 `template-info.json` 的累计字节切点保存三个主前缀：System 1、
+System 1 + System 2、System 1 + System 2 + User 1 固定部分。完成后才接收请求。
+主模板在 `</INSTRUCTIONS><environment_context>` 处截止；标题在环境段开头截止，
+两者都不含环境内容、最终问题及 assistant 生成前缀。模板与 Vulkan `d17ffbbfb`
+使用同一份真实捕获资源，并已用 MLX 聊天模板重新渲染核对。
+来源版本、SHA-256、切点和验证 token 数见同目录 `template-info.json`；
 默认路径由安装位置确定，不依赖启动目录，wheel 和 macOS 发布包均包含该资源。
 不指定 `--model` 的动态加载服务不执行启动预热。
 
 ```sh
 spark-mlx server --model TARGET --draft-model DRAFT
+spark-mlx server --model TARGET --single-prefill
 spark-mlx server --model TARGET --prefill-file /path/to/rendered-prefix.txt
 spark-mlx server --model TARGET --skip-prefill
 ```
@@ -174,7 +179,22 @@ spark-mlx server --model TARGET --skip-prefill
 文件按 UTF-8 读取，默认将 CRLF/CR 规范成 LF；`--prefill-newlines preserve` 保留原换行。
 其余空白及特殊消息 token 保留，不额外添加 BOS，不重复应用聊天模板，也不采样输出。
 `--prefill-file` 与 `--skip-prefill` 不能同时使用；这些选项也可在 `--config` 中设置
-`prefill_file`、`prefill_newlines`、`skip_prefill`，仅对服务启动生效。
+`prefill_file`、`prefill_newlines`、`skip_prefill`、`single_prefill`，仅对服务启动生效。
+`--single-prefill` 只预热完整主前缀，不预热标题或保存中间档位；显式指定
+`--prefill-file` 也使用单段方式，不读取包内标题和切点。
+
+三档主前缀先按运行时 tokenizer 检查逐 token 嵌套，再接续计算后两档，
+不重复执行已预热的部分。标题单独计算。4B 模型的参考输入长度分别是
+26,320 / 34,795 / 36,451 token，标题为 2,388 token；每个缓存快照留出最后一个
+输入 token，在后续请求中计算 logits，因此对应保存 26,319 / 34,794 / 36,450
+和 2,387 token 的 KV。`Startup prefill stage ... reused=... computed=...`
+显示每档复用和新增计算量。技能或固定工作区说明变化时，请求可匹配较短档位。
+
+标题、三档主前缀、真实请求和生成后的 KV 共用原来的条数与字节预算；
+当前默认并不锁定启动快照，容量不足仍会淘汰。dSpark 启动时若未保留全部档位，
+日志会提示增加 `--prompt-cache-bytes` / `--prompt-cache-size` 或使用 `--single-prefill`。
+按当前 4B 浮点 KV 布局估算，四个启动快照约占 3.73 GiB，加上完整请求及回答
+快照约需 6.4 GiB；发布包启动示例使用 8 GiB。运行时实际占用以日志为准。
 
 终端显示 `Prefill complete: ... input tokens, ... cached tokens` 后才启动 HTTP。
 为保证相同输入仍能计算首 token 的 logits，固定前缀的最后一个 token 留给正式请求计算，
