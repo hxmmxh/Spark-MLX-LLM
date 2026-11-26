@@ -15,6 +15,8 @@ _KV_QUANTIZATION_FIELDS = (
     "kv_quantization_scope",
 )
 _KV_FIELDS = ("prefill_step_size", *_KV_QUANTIZATION_FIELDS)
+DEFAULT_PREFILL_STEP_SIZE = 512
+HTTP_PREFILL_STEP_SIZE = 2048
 
 
 def _json_object(value):
@@ -64,7 +66,7 @@ class GenerationConfig:
     enable_thinking: bool | None = True
     reasoning_effort: str | None = "low"
     chat_template_kwargs: Mapping = field(default_factory=dict)
-    prefill_step_size: int = 512
+    prefill_step_size: int | None = None
     kv_bits: int | None = None
     kv_group_size: int = 32
     quantized_kv_start: int = 0
@@ -88,7 +90,7 @@ class GenerationConfig:
         """Original ordinary HTTP defaults; explicit file/CLI values override."""
         return cls(
             temperature=0.0, top_p=1.0, seed=None, enable_thinking=None,
-            reasoning_effort=None, prefill_step_size=2048,
+            reasoning_effort=None, prefill_step_size=HTTP_PREFILL_STEP_SIZE,
         )
 
     @staticmethod
@@ -114,7 +116,6 @@ class GenerationConfig:
             ("top_k", 0),
             ("draft_top_k", 0),
             ("max_draft_tokens", 0),
-            ("prefill_step_size", 1),
             ("quantized_kv_start", 0),
         ):
             value = getattr(self, name)
@@ -122,7 +123,7 @@ class GenerationConfig:
                 raise ValueError(f"{name} must be an integer >= {minimum}")
         for name, minimum in (
             ("max_tokens", 1), ("max_context_length", 1),
-            ("seed", 0), ("cache_limit_mib", 0),
+            ("seed", 0), ("cache_limit_mib", 0), ("prefill_step_size", 1),
         ):
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value < minimum):
@@ -329,7 +330,8 @@ class GenerationConfig:
             default=argparse.SUPPRESS
             if suppress_defaults
             else defaults.prefill_step_size,
-            help=f"Prompt chunk size (default: {defaults.prefill_step_size})",
+            help=("Prompt chunk size (default: 2048)" if server else
+                  "Prompt chunk size (default: 2048 with CED tail prefill, otherwise 512)"),
         )
         group.add_argument(
             "--kv-bits",
@@ -369,7 +371,9 @@ class GenerationConfig:
 
     def kv_kwargs(self):
         """KV/prefill fields from the same generation configuration."""
-        return {name: getattr(self, name) for name in _KV_FIELDS}
+        values = {name: getattr(self, name) for name in _KV_FIELDS}
+        values["prefill_step_size"] = self.prefill_step_size or DEFAULT_PREFILL_STEP_SIZE
+        return values
 
 
 

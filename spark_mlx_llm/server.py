@@ -14,7 +14,7 @@ from mlx_lm import server as upstream
 from mlx_lm.models.cache import LRUPromptCache
 
 from ._server_backend import ModelProvider, ResponseGenerator
-from .config import GenerationConfig
+from .config import HTTP_PREFILL_STEP_SIZE, GenerationConfig
 
 logger = logging.getLogger(__name__)
 _CONFIG_FIELDS = {item.name for item in fields(GenerationConfig)}
@@ -150,7 +150,7 @@ def _namespace(model, config, allowed_origins, **options):
         "max_tokens": config.max_tokens, "temp": config.temperature,
         "top_p": config.top_p, "top_k": config.top_k, "min_p": config.min_p,
         "num_draft_tokens": config.max_draft_tokens,
-        "prefill_step_size": config.prefill_step_size,
+        "prefill_step_size": config.prefill_step_size or HTTP_PREFILL_STEP_SIZE,
         "prompt_cache_size": 10, "prompt_cache_bytes": None,
         "decode_concurrency": 32, "prompt_concurrency": 8,
         **options,
@@ -247,7 +247,7 @@ def serve_cli(args, config, remaining=()):
             "--top-p", str(config.top_p), "--top-k", str(config.top_k),
             "--min-p", str(config.min_p), "--max-tokens", str(config.max_tokens),
             "--num-draft-tokens", str(config.max_draft_tokens),
-            "--prefill-step-size", str(config.prefill_step_size),
+            "--prefill-step-size", str(config.prefill_step_size or HTTP_PREFILL_STEP_SIZE),
             "--allowed-origins", ",".join(args.allowed_origins),
             "--chat-template-args", json.dumps(config.template_kwargs())]
     if args.model is not None:

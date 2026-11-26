@@ -17,3 +17,11 @@
 此前 MLP 精简的独立确认记录为 mlp-direct-20261124-confirm，其基线来自提交 89ab4a0。该轮通过空闲准入，420 对全部通过活动检查，56 项数值核对位级一致。本轮投影对比的两侧均采用已精简的 MLP，未将历史 MLP 收益计入本次投影变化。
 
 仓库清理同时移除了旧的 qkv_rope_backend="metal" 实验开关。视觉融合统一使用 block_backend="segmented"，通用原始计算和回退使用 block_backend="native"。本次清理没有修改 vit_fusion 中已测量的 Python/Metal 算法文件，历史耗时表仍对应原测量轮次。
+
+<a id="ced-tail-prefill"></a>
+
+## Spark3 尾部 prefill 的验证范围
+
+尾部 prefill 沿用 SGLang 的近似策略。后半段 SWA 在裁切后的块边界重建窗口，跳过位置的 KV 不在该窗口内。连续短块最多引入 `sliding_window - 块长` 行历史 KV。边界处的上下文变化会沿后续 SWA 层传播，影响生成输出。新调度以逐块尾部 prefill 为参照，将可丢弃的中间 SWA 窗口延后到末尾重建。显式配置的块长短于 SWA 窗口时，调度逐块保留窗口。
+
+开关用于 `spark_mlx_llm.generate` 中的单请求文本 prefill，且要求原生、未量化的 KV cache。图像输入、量化 KV、逐 token decode 和需要返回每个位置 logits 的 `model(...)` 走常规路径。HTTP 服务的普通请求由上游 MLX-LM 分块。当前 Spark3 支持 SWA 和 FULL，QSA 与推测解码尚未接入。

@@ -16,6 +16,7 @@ from mlx_lm.models.cache import (
 from mlx_lm.utils import quantize_model
 
 from spark_mlx_llm import spark3
+from spark_mlx_llm.dspark.cache import cache_arrays
 from spark_mlx_llm.spark3 import Model, ModelArgs
 
 
@@ -240,7 +241,9 @@ def test_sanitize_accepts_old_consumer_kv_but_keeps_owner_weights_strict():
         ({"kv_source_layer_ids": 0}, "producer"),
         ({"kv_source_layer_ids": 12}, "zero-based"),
         ({"kv_source_layer_ids": True}, "zero-based"),
-        ({"ced_prefill_keep_tokens": 4}, "truncation"),
+        ({"ced_prefill_keep_tokens": 3}, "SWA window"),
+        ({"ced_prefill_keep_tokens": True}, "SWA window"),
+        ({"ced_prefill_keep_tokens": 4, "kv_source_layer_ids": None}, "CED producer"),
         ({"layer_types": ["qwen_sparse_attention"] * 12}, "Unsupported"),
         ({"num_key_value_heads": 3}, "divisible"),
         ({"layer_types": ["full_attention"]}, "length"),
@@ -249,6 +252,106 @@ def test_sanitize_accepts_old_consumer_kv_but_keeps_owner_weights_strict():
 def test_invalid_or_unsupported_config_rejected(overrides, message):
     with pytest.raises(ValueError, match=message):
         make_args(**overrides)
+
+
+def test_tail_prefill_defaults_to_window_with_ced_consumers():
+    assert make_args().ced_prefill_keep_tokens == 4
+    assert make_args(kv_source_layer_ids=None).ced_prefill_keep_tokens is None
+    assert make_args(kv_source_layer_ids=11).ced_prefill_keep_tokens is None
+    assert make_args(ced_prefill_keep_tokens=None).ced_prefill_keep_tokens is None
+
+
+def test_tail_prefill_matches_explicit_cropped_reference(device):
+    mx.random.seed(17)
+    # The explicit mask and additional RoPE in the reference can round
+    # differently on Metal for these small FP32 shapes.
+    tolerance = 1e-5 if device == "cpu" else 3e-3
+    model = Model(make_args(ced_prefill_keep_tokens=4))
+    original, tail = model.make_cache(), model.make_cache()
+    prefix = mx.array([[1, 2, 3, 4, 5]])
+    block = mx.array([[6, 7, 8, 9, 10, 11, 12]])
+    mx.eval(model(prefix, cache=original), model(prefix, cache=tail))
+
+    actual = model.model(block, cache=tail, prefill_keep_tokens=4)
+    hidden = model.model.embedding(block)
+    owners = iter(zip(original, tail, strict=True))
+    for layer in model.layers[:4]:
+        old, new = next(owners)
+        hidden, donor = layer(hidden, cache=old)
+        for expected, cropped in zip(old.state, new.state, strict=True):
+            np.testing.assert_array_equal(np.array(cropped), np.array(expected))
+
+    hidden = hidden[:, -4:]
+    mask = mx.arange(12)[None, :] <= mx.arange(8, 12)[:, None]
+    donor = donor._replace(offset=8, mask=mask)
+    for layer in model.layers[4:]:
+        if layer.is_sliding:
+            hidden, state = layer(hidden)
+            _, new = next(owners)
+            assert new.offset == 12 and new.keys.shape[2] == 4
+            # Both Q and K were rotated from zero in the reference layer.
+            # Rotate the stored K once more to compare its absolute phase.
+            rows = state.keys.transpose(0, 2, 1, 3).reshape(4, 1, 1, 8)
+            keys = layer.self_attn.rope(rows, offset=8).reshape(1, 1, 4, 8)
+            np.testing.assert_allclose(np.array(new.keys), np.array(keys), atol=tolerance)
+            np.testing.assert_allclose(np.array(new.values), np.array(state.values), atol=tolerance)
+        else:
+            hidden, _ = layer(hidden, shared_kv=donor)
+    np.testing.assert_allclose(np.array(actual), np.array(model.model.norm(hidden)), atol=tolerance)
+
+    late_caches = tail[4:]
+    prior_keys = [np.array(cache.keys[..., -2:, :]) for cache in late_caches]
+    model.prefill_cache(mx.array([[13, 14]]), tail)
+    for cache, expected in zip(late_caches, prior_keys, strict=True):
+        np.testing.assert_array_equal(np.array(cache.keys[..., :2, :]), expected)
+
+    mx.eval(model(mx.array([[15]]), cache=tail))
+    assert all(cache.offset == 15 for cache in tail)
+    assert all(cache.keys.shape[2] == 4 for cache in late_caches)
+
+
+def test_tail_prefill_short_chunks_preserve_contiguous_swa_prefix(device):
+    model = Model(make_args(ced_prefill_keep_tokens=4))
+    original, tail = model.make_cache(), model.make_cache()
+    for chunk in ([[1, 2]], [[3, 4]]):
+        inputs = mx.array(chunk)
+        assert model(inputs, cache=original).shape[1] == 2
+        model.prefill_cache(inputs, tail)
+
+    inputs = mx.array([[5]])
+    expected, actual = model(inputs, cache=original), model(inputs, cache=tail)
+    np.testing.assert_allclose(np.array(actual), np.array(expected), atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("chunk_size", "prompt_length", "expected_start"),
+    [(6, 19, 12), (6, 17, 12), (6, 16, 6), (6, 14, 6), (3, 16, 0)],
+)
+def test_deferring_tail_prefill_preserves_final_logits_and_kv(
+    chunk_size, prompt_length, expected_start, device,
+):
+    model = Model(make_args())
+    original, deferred = model.make_cache(), model.make_cache()
+    inputs = mx.arange(1, prompt_length + 3)[None]
+    first_tail = model.prefill_skip_tail_before(prompt_length, chunk_size)
+    assert first_tail == expected_start
+    for start in range(0, prompt_length - 1, chunk_size):
+        block = inputs[:, start : min(start + chunk_size, prompt_length - 1)]
+        model.prefill_cache(block, original)
+        mx.eval(cache_arrays(original))
+        active = model.prefill_cache(block, deferred, prefix_only=start < first_tail)
+        if active is not None:
+            assert len(active) == model.args.kv_source_layer_ids + 1
+        mx.eval(cache_arrays(deferred if active is None else active))
+
+    for i in range(prompt_length - 1, prompt_length + 2):
+        token = inputs[:, i : i + 1]
+        expected = model(token, cache=original)
+        actual = model(token, cache=deferred)
+        np.testing.assert_array_equal(np.array(actual), np.array(expected))
+        assert [cache.meta_state for cache in deferred] == [cache.meta_state for cache in original]
+        for expected_kv, actual_kv in zip(cache_arrays(original), cache_arrays(deferred), strict=True):
+            assert mx.array_equal(actual_kv, expected_kv).item()
 
 
 def test_cache_length_is_validated():

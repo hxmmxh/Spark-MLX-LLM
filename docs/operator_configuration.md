@@ -55,12 +55,12 @@ W8A16 输出路径，其他合适 affine 投影选择 compiled affine 路径。
 benchmark/profiler 共用。
 
 `spark-mlx generate` 的 `--config` JSON 文件也可以设置这些 KV/prefill 字段，
-显式命令行参数优先于文件配置。Python 调用通过 `config.kv_kwargs()` 导出这些字段，
-与采样和模板参数分别传递。
+显式命令行参数优先于文件配置。调用统一生成接口时，由接口按模型解析自动块长。
+通过 `config.kv_kwargs()` 导出给直接调用 MLX-LM 的脚本时，自动块长导出为 512。
 
 | 参数 | 默认值 | 行为 |
 |---|---|---|
-| `prefill_step_size` | `512` | prompt 按 512 token 分块 |
+| `prefill_step_size` | 自动 | CED 尾部 prefill 按 2048 token 分块，其余按 512 token 分块 |
 | `kv_bits` | `None` | 默认不量化，保留模型精度（BF16 模型使用 BF16 KV）；显式设为 `4/8` 可启用量化 |
 | `kv_group_size` | `32` | 启用量化时，每 32 个元素共享量化 metadata |
 | `quantized_kv_start` | `0` | 启用量化时，在最早的上游 chunk/step 检查点转换 KV；不是在第一次模型计算前量化 |

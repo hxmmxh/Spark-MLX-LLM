@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from types import SimpleNamespace
 
-from .config import GenerationConfig
+from .config import DEFAULT_PREFILL_STEP_SIZE, GenerationConfig
 from .dspark.metrics import GenerationResult
 
 __all__ = ["GenerationChunk", "GenerationConfig", "GenerationResult", "generate"]
@@ -184,12 +184,20 @@ def generate(
     from .dspark.sampling import SamplingOptions
 
     stochastic_gpu = bool(cap and config.temperature > 0 and mx.default_device() == mx.gpu)
+    tail_keep = None
+    if getattr(model, "model_type", None) == "spark3" and images is None and config.kv_bits is None:
+        tail_keep = model.args.ced_prefill_keep_tokens
+    prefill_step_size = config.prefill_step_size
+    if prefill_step_size is None:
+        prefill_step_size = 2048 if tail_keep is not None else DEFAULT_PREFILL_STEP_SIZE
     requested = config.to_dict()
     effective = {
         **requested, "requested": requested, "stream": stream,
         "device": str(mx.default_device()),
         "max_draft_tokens": cap,
         "max_tokens": max_tokens,
+        "prefill_step_size": prefill_step_size,
+        "ced_prefill_keep_tokens": tail_keep,
         "max_context_length": context_limit if config.max_context_length is not None else None,
         "asynchronous_draft": bool(config.asynchronous_draft and stochastic_gpu and not config.confidence_threshold),
         "async_context": bool(config.async_context and stochastic_gpu),
@@ -209,7 +217,7 @@ def generate(
         max_new_tokens=max_tokens, max_draft_tokens=cap,
         sampling=SamplingOptions(config.temperature, config.top_p, config.top_k, config.min_p),
         draft_sampling=SamplingOptions(config.draft_temperature, config.draft_top_p, config.draft_top_k),
-        seed=config.seed, prefill_chunk_size=config.prefill_step_size,
+        seed=config.seed, prefill_chunk_size=prefill_step_size,
         confidence_threshold=config.confidence_threshold,
         asynchronous_draft=config.asynchronous_draft, async_context=config.async_context,
         compile_draft_chain=config.compile_draft_chain, apply_chat_template=False,

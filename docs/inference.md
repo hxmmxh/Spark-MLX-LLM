@@ -63,7 +63,7 @@ Python、生成/聊天 CLI 和 benchmark 使用 `GenerationConfig`；HTTP 保留
 | asynchronous_draft / async_context / compile_draft_chain | true / true / true |
 | enable_thinking / reasoning_effort | true / low |
 | apply_chat_template | true |
-| prefill_step_size | 512 |
+| prefill_step_size | 自动选择。CED 尾部 prefill 用 2048，其余用 512 |
 | cache_limit_mib / clear_cache | 256 / false |
 | kv_bits / kv_group_size / quantized_kv_start / kv_quantization_scope | null / 32 / 0 / full-attention |
 | stop_at_eos / confidence_threshold | true / 0 |

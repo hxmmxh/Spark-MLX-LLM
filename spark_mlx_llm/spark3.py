@@ -8,13 +8,14 @@ MLX LM cache save/load and trimming never visit the same cache twice.
 import math
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 import mlx.core as mx
 from mlx import nn
 from mlx_lm.models.base import (
     BaseModelArgs,
     create_attention_mask,
+    create_causal_mask,
     scaled_dot_product_attention,
 )
 from mlx_lm.models.cache import ArraysCache, KVCache, RotatingKVCache
@@ -47,7 +48,7 @@ class ModelArgs(BaseModelArgs):
     attention_bias: bool = False
     mlp_bias: bool = False
     quantization_config: dict[str, Any] | None = None
-    ced_prefill_keep_tokens: int | None = None
+    ced_prefill_keep_tokens: int | Literal["auto"] | None = "auto"
     apply_q_lora: bool = True
     vision_config: dict | VisionArgs | None = None
     image_token_id: int | None = None
@@ -187,10 +188,17 @@ class ModelArgs(BaseModelArgs):
                 raise ValueError(
                     "image_token_id must be inside the vocabulary or negative"
                 )
-        if self.ced_prefill_keep_tokens is not None:
-            raise ValueError(
-                "Spark3 approximate CED prefill truncation is not supported"
-            )
+        keep = self.ced_prefill_keep_tokens
+        if keep == "auto":
+            if source is not None and "full_attention" in self.layer_types[source + 1 :]:
+                self.ced_prefill_keep_tokens = self.sliding_window
+            else:
+                self.ced_prefill_keep_tokens = None
+        elif keep is not None:
+            if type(keep) is not int or keep < self.sliding_window:
+                raise ValueError("ced_prefill_keep_tokens must cover the SWA window")
+            if source is None or source == self.num_hidden_layers - 1:
+                raise ValueError("ced_prefill_keep_tokens requires layers after a CED producer")
 
     def is_ced_consumer(self, layer_idx: int) -> bool:
         return (
@@ -389,6 +397,38 @@ class _KVState(NamedTuple):
     cache: Any
 
 
+class _TailPrefillSWACache:
+    """Append a bounded prefill suffix without changing the decode cache type."""
+
+    def __init__(self, cache, block_length, skipped):
+        self.cache = cache
+        self.offset = cache.offset + skipped
+        # Match SGLang's bounded SWA read for each scheduled prefill block.
+        # When cropping creates a gap, no KV from before the gap can be read.
+        self.prefix = min(cache.offset, max(0, cache.max_size - block_length))
+
+    def make_mask(self, length, *, return_array=False, window_size=None):
+        if not return_array and self.prefix + length <= window_size:
+            return "causal"
+        return create_causal_mask(length, self.prefix, window_size=window_size)
+
+    def update_and_fetch(self, keys, values):
+        cache = self.cache
+        end = self.offset + keys.shape[2]
+        if self.prefix:
+            prev_keys = cache._temporal_order(cache.keys)[..., -self.prefix :, :]
+            prev_values = cache._temporal_order(cache.values)[..., -self.prefix :, :]
+            keys = mx.concatenate((prev_keys, keys), axis=2)
+            values = mx.concatenate((prev_values, values), axis=2)
+        window = cache.max_size
+        stored = min(keys.shape[2], window)
+        cache.state = (keys[..., -stored:, :], values[..., -stored:, :])
+        # A compact, chronological buffer. Even if rows were skipped, the
+        # next token uses the absolute position at the end of the block.
+        cache.meta_state = tuple(map(str, (0, window, end, stored)))
+        return keys, values
+
+
 class Attention(nn.Module):
     def __init__(self, args: ModelArgs, layer_idx: int):
         super().__init__()
@@ -569,7 +609,10 @@ class Spark3Model(nn.Module):
             i for i in range(args.num_hidden_layers) if not args.is_ced_consumer(i)
         )
 
-    def __call__(self, inputs, cache=None, input_embeddings=None, positions=None):
+    def __call__(
+        self, inputs, cache=None, input_embeddings=None, positions=None, *,
+        prefill_keep_tokens=None, ced_prefix_only=False,
+    ):
         expected = len(self.cache_layer_ids) + int(self.args.uses_mrope)
         if cache is None:
             cache = [None] * expected
@@ -581,6 +624,8 @@ class Spark3Model(nn.Module):
         hidden_states = (
             input_embeddings if input_embeddings is not None else self.embedding(inputs)
         )
+        block_length = hidden_states.shape[1]
+        skipped = max(0, block_length - prefill_keep_tokens) if prefill_keep_tokens else 0
         if self.args.uses_mrope:
             batch, length = hidden_states.shape[:2]
             offset = cache[0].offset if cache[0] is not None else 0
@@ -604,16 +649,33 @@ class Spark3Model(nn.Module):
                     positions.max(axis=(0, 2)) + 1 - (mx.array(offset) + length)
                 )
         owner_caches = iter(cache[: len(self.cache_layer_ids)])
+        source = self.args.kv_source_layer_ids
+        tail_start = source + 1 if prefill_keep_tokens is not None else len(self.layers)
         shared_kv = None
         for i, layer in enumerate(self.layers):
+            if i == tail_start and ced_prefix_only:
+                return hidden_states
+            if i == tail_start and skipped:
+                hidden_states = hidden_states[:, skipped:]
+                if positions is not None:
+                    positions = positions[..., skipped:]
+                mask = shared_kv.mask
+                if isinstance(mask, mx.array):
+                    mask = mask[..., skipped:, :]
+                # An implicit causal mask already aligns queries to the last
+                # rows of the producer's full key sequence.
+                shared_kv = shared_kv._replace(offset=shared_kv.offset + skipped, mask=mask)
             consumer = layer.self_attn.is_ced_consumer
+            layer_cache = None if consumer else next(owner_caches)
+            if i >= tail_start and layer.is_sliding:
+                layer_cache = _TailPrefillSWACache(layer_cache, block_length, skipped)
             hidden_states, state = layer(
                 hidden_states,
-                cache=None if consumer else next(owner_caches),
+                cache=layer_cache,
                 shared_kv=shared_kv if consumer else None,
                 positions=positions,
             )
-            if i == self.args.kv_source_layer_ids:
+            if i == source:
                 shared_kv = state
         return self.norm(hidden_states)
 
@@ -657,6 +719,38 @@ class Model(nn.Module):
         if self.args.tie_word_embeddings:
             return self.model.embedding.as_linear(hidden_states)
         return self.lm_head(hidden_states)
+
+    def prefill_skip_tail_before(self, prompt_tokens, chunk_size):
+        """Return the first bulk block that must build late-layer SWA KV."""
+        window = self.args.sliding_window
+        bulk_tokens = prompt_tokens - 1
+        if (
+            self.args.ced_prefill_keep_tokens is None
+            or chunk_size < max(2, window)
+            or bulk_tokens <= chunk_size
+        ):
+            return 0
+        last_start = (bulk_tokens - 1) // chunk_size * chunk_size
+        if bulk_tokens - last_start < window:
+            # A short last block can read the immediately preceding SWA window.
+            last_start -= chunk_size
+        return last_start
+
+    def prefill_cache(self, inputs, cache, *, prefix_only=False):
+        """Fill an ordinary single-request cache when prompt logits are unused."""
+        keep = self.args.ced_prefill_keep_tokens
+        if keep is None or inputs.shape[0] != 1 or inputs.shape[1] == 1:
+            self(inputs, cache=cache)
+            return
+        self.model(inputs, cache=cache, prefill_keep_tokens=keep, ced_prefix_only=prefix_only)
+        if prefix_only:
+            early_count = self.args.kv_source_layer_ids + 1
+            owner_count = len(self.model.cache_layer_ids)
+            # The retained bulk block recreates the late buffers. Advance their
+            # absolute positions now, while only the early owners have arrays.
+            for late_cache in cache[early_count:owner_count]:
+                late_cache.offset = cache[0].offset
+            return cache[:early_count] + cache[owner_count:]
 
     def prepare_inputs(self, input_ids, pixel_values, image_grid_thw, image_offsets):
         """Encode images once and splice their features into one prompt's embeddings."""

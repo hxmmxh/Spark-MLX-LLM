@@ -85,6 +85,8 @@ def _baseline_sampler(options):
 def _stream_baseline(pair, ids, options, max_new_tokens, chunk_size, mode, kv_config=None):
     """Use ordinary caches and pipeline target sampling without host token IDs."""
     model = pair.target.model
+    prefill = model
+    skip_tail_before = 0
     if kv_config is not None and kv_config.kv_bits is not None:
         from ..kv_cache import make_prompt_cache
         from mlx_lm.generate import maybe_quantize_kv_cache
@@ -92,6 +94,10 @@ def _stream_baseline(pair, ids, options, max_new_tokens, chunk_size, mode, kv_co
         caches = make_prompt_cache(model, kv_config.kv_quantization_scope)
     else:
         caches = model.make_cache()
+        prefill = getattr(model, "prefill_cache", model)
+        plan_tail = getattr(model, "prefill_skip_tail_before", None)
+        if plan_tail is not None:
+            skip_tail_before = plan_tail(len(ids), chunk_size)
 
     def quantize():
         if kv_config is not None and kv_config.kv_bits is not None:
@@ -109,9 +115,14 @@ def _stream_baseline(pair, ids, options, max_new_tokens, chunk_size, mode, kv_co
     start = time.perf_counter()
     for first in range(0, len(ids) - 1, chunk_size):
         chunk = ids[first : min(first + chunk_size, len(ids) - 1)]
-        model(mx.array([chunk]), cache=caches)
+        tokens = mx.array([chunk])
+        if first < skip_tail_before:
+            active_caches = prefill(tokens, cache=caches, prefix_only=True)
+        else:
+            prefill(tokens, cache=caches)
+            active_caches = caches
         quantize()
-        mx.eval(cache_arrays(caches))
+        mx.eval(cache_arrays(active_caches))
     current = step(mx.array(ids[-1:]))
     first_token = int(current.item())
     prefill_seconds = time.perf_counter() - start

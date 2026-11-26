@@ -47,10 +47,27 @@ keeps head-gate projections at source precision. The unified `spark-mlx convert`
 command remains Spark2_5-only; use the Spark3 quantization tool below for X3
 checkpoints.
 
-This implementation does not support QSA, DSpark, or approximate CED prefill
-truncation. Unsupported layer types and a non-null `ced_prefill_keep_tokens`
-are rejected. It does not use the Spark2_5 fused-QKV extension for Spark3's
-factorized query path.
+### 尾部 prefill
+
+Spark3 CED 模型在 `spark_mlx_llm.generate` 单请求文本生成中默认开启尾部 prefill。
+模型按 SWA 窗口保留尾部 token。9B CED 模型默认每块处理 2048 个输入 token，
+后 20 层只在末尾的缓存重建阶段处理块尾最多 512 个 token。
+
+```python
+from spark_mlx_llm import generate, load
+
+model, tokenizer = load("/path/to/9b_ced_20000-w4-head8-g64")
+result = generate(model, tokenizer, "你好")
+```
+
+模型将每个预填充块完整处理到第 19 层（从 0 开始）。块长至少为一个 SWA 窗口时，
+第 20–39 层从最后一个中间块开始重建自己的窗口。若最后一个中间块短于窗口，
+重建从再前一个块开始，以保留短块需要的历史 KV。参与重建的块将其尾部最多
+512 个 token 送入后 20 层，并保留这些 token 的绝对位置。
+FULL 消费层读取第 19 层完整的因果 KV。最后一个 prompt token 和后续 decode
+走常规前向。
+加载时传入 `model_config={"ced_prefill_keep_tokens": None}` 可以关闭尾部 prefill。
+适用范围见 [验证说明](defensive-notes.md#ced-tail-prefill)。
 
 ### Spark3 images and mRoPE
 
@@ -76,9 +93,7 @@ SWA/FULL layers, including the interleaved layout used by `hf_latest`. Image
 tokens receive T/H/W coordinates; later text and decode retain the resulting
 position offset. Each mRoPE request has one additional native `ArraysCache`
 holding that offset, so save/load retains it and concurrent requests do not
-share position state. These caches cannot be trimmed into an image prefix;
-the ordinary 9B cache behavior is unchanged. Approximate prefill truncation is
-not enabled.
+share position state. These caches cannot be trimmed into an image prefix.
 
 Install Pillow for image loading and resizing (no PyTorch is required):
 

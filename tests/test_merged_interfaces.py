@@ -88,6 +88,38 @@ def test_public_load_and_generation_for_both_architectures(
     assert before == set(dict(tree_flatten(loaded.parameters())))
 
 
+def test_public_spark3_generation_defaults_to_cropped_prefill(tmp_path, monkeypatch):
+    model, tokenizer = save_and_load(Spark3Model(spark3_args()), tmp_path, monkeypatch)
+    tail_layer = model.layers[4]
+    block_type = type(tail_layer)
+    forward = block_type.__call__
+    rows = []
+
+    def record(layer, inputs, *args, **kwargs):
+        if layer is tail_layer:
+            rows.append(inputs.shape[1])
+        return forward(layer, inputs, *args, **kwargs)
+
+    monkeypatch.setattr(block_type, "__call__", record)
+    prompt = [1] * 14
+    config = GenerationConfig(max_tokens=1, temperature=0)
+    result = generate(model, tokenizer, prompt, config=config)
+    assert result.effective_config["prefill_step_size"] == 2048
+    assert result.effective_config["ced_prefill_keep_tokens"] == 4
+    assert rows == [4, 1]
+
+    rows.clear()
+    result = generate(model, tokenizer, prompt, config=config.overlay({"prefill_step_size": 6}))
+    assert result.effective_config["prefill_step_size"] == 6
+    assert rows == [4, 1, 1]
+
+    rows.clear()
+    model.args.ced_prefill_keep_tokens = None
+    result = generate(model, tokenizer, prompt, config=config)
+    assert result.effective_config["prefill_step_size"] == 512
+    assert rows == [13, 1]
+
+
 def test_image_generation_uses_unified_engine_across_prefill_chunks(tmp_path, monkeypatch):
     Image = pytest.importorskip("PIL.Image")
     model, tokenizer = save_and_load(
