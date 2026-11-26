@@ -494,3 +494,52 @@ def test_swa_prefill_defaults_to_skip_with_a_chronological_window(monkeypatch):
     model.set_swa_prefill_kv_skip(False)
     assert swa._try_swa_prefill(q, state) is None
     assert len(calls) == 3
+
+
+def test_w4_gate_up_packs_small_ffn_rows_and_refreshes_weights(device, monkeypatch):
+    model = Model(make_args(hidden_size=64, intermediate_size=128)).eval()
+    model.set_dtype(mx.bfloat16)
+    block = model.layers[0]
+    mlp = block.mlp
+    spark3.nn.quantize(mlp, group_size=32, bits=4)
+    norm = block.post_attention_layernorm
+    gate, up, down = mlp.gate_proj, mlp.up_proj, mlp.down_proj
+    fused = spark3._fused_ffn
+    calls = []
+
+    def record(x, attention, norm_weight, gate_args, up_args, down_args, eps):
+        calls.append(up_args is None)
+        return fused(x, attention, norm_weight, gate_args, up_args, down_args, eps)
+
+    monkeypatch.setattr(spark3, "_fused_ffn", record)
+    # Exercise the routing logic on the CPU as well. MLX still executes the
+    # reference and candidate operations on the selected test device.
+    if device == "cpu":
+        monkeypatch.setattr(mx.metal, "is_available", lambda: True)
+        monkeypatch.setattr(mx, "default_device", lambda: mx.gpu)
+
+    cases = (
+        (1, 1, True), (1, 4, True), (1, 8, True),
+        (2, 2, True), (1, 2, False), (1, 16, False),
+    )
+    for batch, length, packed in cases:
+        shape = (batch, length, 64)
+        x, attention = (mx.random.normal(shape).astype(mx.bfloat16) for _ in range(2))
+        expected = fused(
+            x, attention, norm.weight,
+            spark3._quantized_linear_args(gate),
+            spark3._quantized_linear_args(up),
+            spark3._quantized_linear_args(down), norm.eps,
+        )
+        result = block._ffn(x, attention)
+        assert calls[-1] is packed
+        assert mx.array_equal(expected, result).item()
+
+    original = spark3._packed_w4_gate_up(mlp)
+    assert spark3._packed_w4_gate_up(mlp) is original
+    changed = gate.scales * 2
+    model.load_weights([("model.layers.0.mlp.gate_proj.scales", changed)], strict=False)
+    assert not hasattr(mlp, "_packed_gate_up")
+    rebuilt = spark3._packed_w4_gate_up(mlp)
+    assert rebuilt is not original
+    assert mx.array_equal(rebuilt[1][: changed.shape[0]], changed).item()

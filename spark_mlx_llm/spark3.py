@@ -22,6 +22,7 @@ from mlx_lm.models.cache import ArraysCache, KVCache, RotatingKVCache
 
 from .mrope import MultimodalRoPE, build_mrope_positions
 from .ops import _swa_prefill
+from .ops._ffn_gate_up import _PACKED_FFN_ROWS, _packed_ffn, _packed_w4_gate_up
 from .ops.sdpa import SDPAConfig, dispatch_sdpa
 from .spark3_vision import VisionArgs, VisionTransformer
 
@@ -389,6 +390,8 @@ def _fused_ffn(
 ):
     residual = x + attention_output
     normalized = mx.fast.rms_norm(residual, norm_weight, eps)
+    if up_params is None:
+        return _packed_ffn(normalized, residual, gate_params, down_params)
     gate = _quantized_linear(normalized, *gate_params)
     up = _quantized_linear(normalized, *up_params)
     return residual + _quantized_linear(nn.gelu(gate) * up, *down_params)
@@ -607,12 +610,21 @@ class TransformerBlock(nn.Module):
             projections = self.mlp.gate_proj, self.mlp.up_proj, self.mlp.down_proj
             if all(_is_affine_quantized_linear(p) for p in projections):
                 gate, up, down = projections
+                gate_up = None
+                if (
+                    not self.training
+                    and x.ndim == 3
+                    and x.shape[0] * x.shape[1] in _PACKED_FFN_ROWS
+                    and x.dtype == mx.bfloat16
+                    and mx.default_device() == mx.gpu
+                ):
+                    gate_up = _packed_w4_gate_up(self.mlp)
                 return _fused_ffn(
                     x,
                     attention_output,
                     self.post_attention_layernorm.weight,
-                    _quantized_linear_args(gate),
-                    _quantized_linear_args(up),
+                    gate_up if gate_up is not None else _quantized_linear_args(gate),
+                    None if gate_up is not None else _quantized_linear_args(up),
                     _quantized_linear_args(down),
                     self.post_attention_layernorm.eps,
                 )
@@ -819,6 +831,9 @@ class Model(nn.Module):
         return self.model.layers
 
     def load_weights(self, file_or_weights, strict=True):
+        for layer in self.layers:
+            if hasattr(layer.mlp, "_packed_gate_up"):
+                object.__delattr__(layer.mlp, "_packed_gate_up")
         super().load_weights(file_or_weights, strict=strict)
         for layer in self.layers:
             out_proj = layer.self_attn.out_proj

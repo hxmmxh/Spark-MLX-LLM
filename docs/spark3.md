@@ -76,6 +76,12 @@ query token 的 SWA prefill 上启用跳块。
 每个 Q 块按滑窗算出可见的 KV 块范围，边界仍按 token 屏蔽。其他形状和设备走原生 SDPA。
 调用 `model.set_swa_prefill_kv_skip(False)` 可切回原生实现，用于 prefill A/B 测量。
 
+### W4/G32 FFN
+
+Metal 上的 BF16 推理在 M=1、4、8 时使用打包的 W4/G32 gate/up。两组权重和量化系数
+按输出通道打包，由一次 MLX `quantized_matmul` 投影后切成 gate 和 up。打包权重在后续调用中复用。
+M 为进入 FFN 的总 token 行数。
+
 ### Spark3 images and mRoPE
 
 Spark3 also loads nested `text_config` plus optional `vision_config`, including
