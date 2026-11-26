@@ -10,6 +10,7 @@ from mlx.utils import tree_flatten
 from mlx_lm.models.cache import (
     BatchKVCache,
     BatchRotatingKVCache,
+    RotatingKVCache,
     load_prompt_cache,
     save_prompt_cache,
 )
@@ -460,3 +461,36 @@ def test_w8a8_configuration_falls_back_to_native_mlx_weights(monkeypatch, device
     np.testing.assert_allclose(
         np.array(full), np.array(cached), atol=tolerance, rtol=tolerance
     )
+
+
+def test_swa_prefill_defaults_to_skip_with_a_chronological_window(monkeypatch):
+    model = Model(make_args(sliding_window=512))
+    swa = model.layers[0].self_attn
+    full = model.layers[3].self_attn
+    q = mx.zeros((1, 4, 16, 8))
+    k = mx.zeros((1, 1, 16, 8))
+    v = mx.zeros(k.shape)
+    rolling = RotatingKVCache(max_size=512, keep=0)
+    mask = mx.zeros((16, 16), dtype=mx.bool_)
+    state = spark3._KVState(k, v, 0, mask, rolling)
+    calls = []
+
+    def skip_tiles(query, keys, values):
+        calls.append((query, keys, values))
+        return query
+
+    monkeypatch.setattr(spark3._swa_prefill, "try_prefill", skip_tiles)
+    assert swa._try_swa_prefill(q, state) is q
+    model.set_swa_prefill_kv_skip(False)
+    assert swa._try_swa_prefill(q, state) is None
+    model.set_swa_prefill_kv_skip(True)
+    assert swa._try_swa_prefill(q, state) is q
+    assert swa._try_swa_prefill(q, state._replace(cache=None)) is q
+    assert swa._try_swa_prefill(q, state._replace(mask="causal")) is None
+    assert swa._try_swa_prefill(q, state._replace(
+        cache=RotatingKVCache(max_size=512, keep=1),
+    )) is None
+    assert full._try_swa_prefill(q, state) is None
+    model.set_swa_prefill_kv_skip(False)
+    assert swa._try_swa_prefill(q, state) is None
+    assert len(calls) == 3

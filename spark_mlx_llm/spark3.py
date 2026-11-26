@@ -21,6 +21,7 @@ from mlx_lm.models.base import (
 from mlx_lm.models.cache import ArraysCache, KVCache, RotatingKVCache
 
 from .mrope import MultimodalRoPE, build_mrope_positions
+from .ops import _swa_prefill
 from .ops.sdpa import SDPAConfig, dispatch_sdpa
 from .spark3_vision import VisionArgs, VisionTransformer
 
@@ -54,6 +55,7 @@ class ModelArgs(BaseModelArgs):
     vision_config: dict | VisionArgs | None = None
     image_token_id: int | None = None
     image_token: str | None = None
+    swa_prefill_kv_skip: bool = True
     fused_quantized_sdpa: bool = True
 
     @classmethod
@@ -445,6 +447,7 @@ class Attention(nn.Module):
         layer_type = args.layer_types[layer_idx]
         self.is_sliding = layer_type == "sliding_attention"
         self.window_size = args.sliding_window if self.is_sliding else None
+        self.swa_prefill_kv_skip = args.swa_prefill_kv_skip
         self.is_ced_consumer = args.is_ced_consumer(layer_idx)
         self.headwise_attn_output_gate = args.headwise_attn_output_gate
 
@@ -522,8 +525,20 @@ class Attention(nn.Module):
             state = _KVState(keys, values, offset, mask, cache)
 
         queries = self._apply_rope(queries, state.offset, positions)
+        output = self._try_swa_prefill(queries, state)
+        if output is None:
+            output = self._native_sdpa(queries, state)
+        if self.headwise_attn_output_gate:
+            output = self._attention_output(x, output)
+        else:
+            output = self.out_proj(
+                output.transpose(0, 2, 1, 3).reshape(batch, length, self.q_size)
+            )
+        return output, state
+
+    def _native_sdpa(self, queries, state):
         if getattr(state.cache, "bits", None) == 8:
-            output = dispatch_sdpa(
+            return dispatch_sdpa(
                 queries,
                 state.keys,
                 state.values,
@@ -532,22 +547,25 @@ class Attention(nn.Module):
                 mask=state.mask,
                 config=self.sdpa_config,
             )
-        else:
-            output = scaled_dot_product_attention(
-                queries,
-                state.keys,
-                state.values,
-                cache=state.cache,
-                scale=self.scale,
-                mask=state.mask,
-            )
-        if self.headwise_attn_output_gate:
-            output = self._attention_output(x, output)
-        else:
-            output = self.out_proj(
-                output.transpose(0, 2, 1, 3).reshape(batch, length, self.q_size)
-            )
-        return output, state
+        return scaled_dot_product_attention(
+            queries,
+            state.keys,
+            state.values,
+            cache=state.cache,
+            scale=self.scale,
+            mask=state.mask,
+        )
+
+    def _try_swa_prefill(self, queries, state):
+        if (
+            self.swa_prefill_kv_skip and self.window_size == 512 and not self.is_ced_consumer
+            and (state.cache is None or (
+                type(state.cache) is RotatingKVCache and state.cache.keep == 0
+            ))
+            and isinstance(state.mask, mx.array) and state.mask.dtype == mx.bool_
+        ):
+            return _swa_prefill.try_prefill(queries, state.keys, state.values)
+        return None
 
     def _apply_rope(self, x, offset, positions):
         if isinstance(self.rope, MultimodalRoPE):
@@ -806,6 +824,13 @@ class Model(nn.Module):
             out_proj = layer.self_attn.out_proj
             if isinstance(out_proj, _W8A8QuantizedLinear):
                 out_proj._prepare_w8a8()
+        return self
+
+    def set_swa_prefill_kv_skip(self, enabled: bool):
+        """Select the specialized SWA prefill for eligible X3 attention calls."""
+        for layer in self.layers:
+            layer.self_attn.swa_prefill_kv_skip = enabled
+        self.args.swa_prefill_kv_skip = enabled
         return self
 
     @property

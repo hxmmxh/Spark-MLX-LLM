@@ -69,6 +69,13 @@ FULL 消费层读取第 19 层完整的因果 KV。最后一个 prompt token 和
 加载时传入 `model_config={"ced_prefill_keep_tokens": None}` 可以关闭尾部 prefill。
 适用范围见 [验证说明](defensive-notes.md#ced-tail-prefill)。
 
+### SWA prefill 跳块
+
+X3 4B 默认在 M5 Pro、MLX 0.32.4、单请求、BF16 KV、512 滑窗和至少 1024 个
+query token 的 SWA prefill 上启用跳块。
+每个 Q 块按滑窗算出可见的 KV 块范围，边界仍按 token 屏蔽。其他形状和设备走原生 SDPA。
+调用 `model.set_swa_prefill_kv_skip(False)` 可切回原生实现，用于 prefill A/B 测量。
+
 ### Spark3 images and mRoPE
 
 Spark3 also loads nested `text_config` plus optional `vision_config`, including
