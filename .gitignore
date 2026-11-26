@@ -232,3 +232,6 @@ tests
 !/tests/
 /tests/*
 !/tests/test_vit_fusion.py
+
+# Keep the Hadamard KV regression tests reviewable.
+!/tests/test_kv_cache.py

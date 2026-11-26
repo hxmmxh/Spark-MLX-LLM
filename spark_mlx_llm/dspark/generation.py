@@ -88,10 +88,11 @@ def _stream_baseline(pair, ids, options, max_new_tokens, chunk_size, mode, kv_co
     prefill = model
     skip_tail_before = 0
     if kv_config is not None and kv_config.kv_bits is not None:
-        from ..kv_cache import make_prompt_cache
-        from mlx_lm.generate import maybe_quantize_kv_cache
+        from ..kv_cache import make_prompt_cache, maybe_quantize_kv_cache
 
-        caches = make_prompt_cache(model, kv_config.kv_quantization_scope)
+        caches = make_prompt_cache(
+            model, kv_config.kv_quantization_scope, kv_hadamard=kv_config.kv_hadamard
+        )
     else:
         caches = model.make_cache()
         prefill = getattr(model, "prefill_cache", model)
@@ -104,6 +105,7 @@ def _stream_baseline(pair, ids, options, max_new_tokens, chunk_size, mode, kv_co
             maybe_quantize_kv_cache(
                 caches, kv_config.quantized_kv_start,
                 kv_config.kv_group_size, kv_config.kv_bits,
+                kv_hadamard=kv_config.kv_hadamard,
             )
     sample = _baseline_sampler(options)
 

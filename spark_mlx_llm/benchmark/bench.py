@@ -84,7 +84,9 @@ def load_benchmark(args):
     options = kv_generation_options(args)
     if options["kv_bits"] is not None:
         # Fail for unsupported cache layouts before warmup or measured generation.
-        make_benchmark_cache(model, options["kv_quantization_scope"])
+        make_benchmark_cache(
+            model, options["kv_quantization_scope"], kv_hadamard=options["kv_hadamard"]
+        )
     mx.eval(model.parameters())
     # Match mlx_lm.benchmark: keep every trial at the requested output length.
     rng = random.Random(0)
@@ -104,6 +106,7 @@ def run_generation(
     prefill_step_size,
     *,
     kv_bits=GenerationConfig.kv_bits,
+    kv_hadamard=GenerationConfig.kv_hadamard,
     kv_group_size=32,
     quantized_kv_start=0,
     kv_quantization_scope=GenerationConfig.kv_quantization_scope,
@@ -113,7 +116,8 @@ def run_generation(
         max_tokens=decode_tokens, temperature=0, seed=0,
         apply_chat_template=False, stop_at_eos=False, clear_cache=True,
         prefill_step_size=prefill_step_size, kv_bits=kv_bits,
-        kv_group_size=kv_group_size, quantized_kv_start=quantized_kv_start,
+        kv_hadamard=kv_hadamard, kv_group_size=kv_group_size,
+        quantized_kv_start=quantized_kv_start,
         kv_quantization_scope=kv_quantization_scope,
     )
     mx.synchronize()
@@ -147,7 +151,8 @@ def main():
         print("KV cache: model dtype (quantization disabled)", flush=True)
     else:
         print(
-            f"KV cache: {args.kv_bits}-bit | Group: {args.kv_group_size} | "
+            f"KV cache: {args.kv_bits}-bit{' Hadamard' if args.kv_hadamard else ''} | "
+            f"Group: {args.kv_group_size} | "
             f"Start offset: {args.quantized_kv_start} | "
             f"Scope: {args.kv_quantization_scope}",
             flush=True,

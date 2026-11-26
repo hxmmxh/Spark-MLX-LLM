@@ -10,6 +10,7 @@ from pathlib import Path
 
 _KV_QUANTIZATION_FIELDS = (
     "kv_bits",
+    "kv_hadamard",
     "kv_group_size",
     "quantized_kv_start",
     "kv_quantization_scope",
@@ -68,6 +69,7 @@ class GenerationConfig:
     chat_template_kwargs: Mapping = field(default_factory=dict)
     prefill_step_size: int | None = None
     kv_bits: int | None = None
+    kv_hadamard: bool = False
     kv_group_size: int = 32
     quantized_kv_start: int = 0
     kv_quantization_scope: str = "full-attention"
@@ -163,6 +165,10 @@ class GenerationConfig:
             type(self.kv_bits) is not int or self.kv_bits not in (4, 8)
         ):
             raise ValueError("kv_bits must be None, 4 or 8")
+        if type(self.kv_hadamard) is not bool:
+            raise ValueError("kv_hadamard must be a boolean")
+        if self.kv_hadamard and self.kv_bits != 8:
+            raise ValueError("kv_hadamard requires kv_bits=8")
         if type(self.kv_group_size) is not int or self.kv_group_size not in (
             32,
             64,
@@ -341,6 +347,13 @@ class GenerationConfig:
             default=argparse.SUPPRESS if suppress_defaults else defaults.kv_bits,
             help=(argparse.SUPPRESS if server else
                   "KV quantization bits (default: none); 'none' keeps model precision"),
+        )
+        group.add_argument(
+            "--kv-hadamard",
+            action=argparse.BooleanOptionalAction,
+            default=argparse.SUPPRESS if suppress_defaults else defaults.kv_hadamard,
+            help=(argparse.SUPPRESS if server else
+                  "Rotate K/V with a Hadamard transform (requires --kv-bits 8)"),
         )
         group.add_argument(
             "--kv-group-size",

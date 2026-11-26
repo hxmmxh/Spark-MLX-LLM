@@ -23,7 +23,7 @@
 |---|---|---|
 | W8 路由（自动） | 主模型 native；草稿按设备选择 | 草稿单行 W8A16，多行在 M5+ 使用 NAX，在兼容旧GPU使用 matrix；CPU及不支持形状保留回退 |
 | `w4_qmv_backend` | `"native"` | W4 层保持原生 affine W4A16 |
-| `fused_quantized_sdpa` | `True` | 对满足条件的 INT8/G32 KV、D256、单 query GPU attention 使用融合算子 |
+| `fused_quantized_sdpa` | `True` | Metal 上的 INT8/G32、D256 单 token attention。GQA 1/2/4/8 使用可选扩展的融合核。GQA 16/32 在 M5 系列 GPU 上使用 TensorOps 融合核，适用条件见下文 |
 | `fused_quantized_sdpa_prefill` | `False` | 多 query attention 保留原有实现；开启时还需 `fused_quantized_sdpa=True` |
 | `tuned_bf16_sdpa` | `False` | 默认关闭调优 BF16 decode SDPA |
 
@@ -56,12 +56,13 @@ benchmark/profiler 共用。
 
 `spark-mlx generate` 的 `--config` JSON 文件也可以设置这些 KV/prefill 字段，
 显式命令行参数优先于文件配置。调用统一生成接口时，由接口按模型解析自动块长。
-通过 `config.kv_kwargs()` 导出给直接调用 MLX-LM 的脚本时，自动块长导出为 512。
+通过 `config.kv_kwargs()` 导出 Spark KV 设置时，自动块长导出为 512。
 
 | 参数 | 默认值 | 行为 |
 |---|---|---|
 | `prefill_step_size` | 自动 | CED 尾部 prefill 按 2048 token 分块，其余按 512 token 分块 |
 | `kv_bits` | `None` | 默认不量化，保留模型精度（BF16 模型使用 BF16 KV）；显式设为 `4/8` 可启用量化 |
+| `kv_hadamard` | `False` | 与 `kv_bits=8` 一起启用归一化 Hadamard 旋转，CLI 对应 `--kv-hadamard` |
 | `kv_group_size` | `32` | 启用量化时，每 32 个元素共享量化 metadata |
 | `quantized_kv_start` | `0` | 启用量化时，在最早的上游 chunk/step 检查点转换 KV；不是在第一次模型计算前量化 |
 | `kv_quantization_scope` | `"full-attention"` | 启用量化时仅转换全局层；滑窗 cache 保持模型精度和旋转状态 |
@@ -69,6 +70,9 @@ benchmark/profiler 共用。
 
 此 1.7B 模型有 7 层全局 attention 和 21 层滑窗 attention。
 打开融合 SDPA 本身不会创建 INT8 KV；需显式设置 `kv_bits=8` 才会启用 INT8 KV 路径。
+Spark3 的 GQA 16/32 decode 支持 Raw KV8 和 Hadamard KV8。TensorOps 路径使用
+BF16/FP16 query，在 KV 长度达到 1024 后启用，并要求 macOS 26.2+ 和 MLX 0.32.4+。
+可用 `--no-fused-quantized-sdpa` 切回通用路径做对照。
 每次未指定 cache 的生成创建新的 cache；传入 `prompt_cache` 则原地继续使用。
 
 所有生成入口默认均不量化 KV。直接调用 `mlx_lm.generate`、MLX-LM chat/server

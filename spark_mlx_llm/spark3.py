@@ -21,6 +21,7 @@ from mlx_lm.models.base import (
 from mlx_lm.models.cache import ArraysCache, KVCache, RotatingKVCache
 
 from .mrope import MultimodalRoPE, build_mrope_positions
+from .ops.sdpa import SDPAConfig, dispatch_sdpa
 from .spark3_vision import VisionArgs, VisionTransformer
 
 
@@ -53,6 +54,7 @@ class ModelArgs(BaseModelArgs):
     vision_config: dict | VisionArgs | None = None
     image_token_id: int | None = None
     image_token: str | None = None
+    fused_quantized_sdpa: bool = True
 
     @classmethod
     def from_dict(cls, params):
@@ -75,6 +77,7 @@ class ModelArgs(BaseModelArgs):
         return super().from_dict(fields)
 
     def __post_init__(self):
+        SDPAConfig.validate_values(vars(self))
         if self.model_type != "spark3":
             raise ValueError(f"Expected model_type 'spark3', got {self.model_type!r}")
         for name in (
@@ -436,6 +439,7 @@ class Attention(nn.Module):
         self.n_kv_heads = args.num_key_value_heads
         self.head_dim = args.head_dim
         self.scale = self.head_dim**-0.5
+        self.sdpa_config = SDPAConfig(fused_quantized_sdpa=args.fused_quantized_sdpa)
         self.q_size = self.n_heads * self.head_dim
         self.kv_size = self.n_kv_heads * self.head_dim
         layer_type = args.layer_types[layer_idx]
@@ -518,14 +522,25 @@ class Attention(nn.Module):
             state = _KVState(keys, values, offset, mask, cache)
 
         queries = self._apply_rope(queries, state.offset, positions)
-        output = scaled_dot_product_attention(
-            queries,
-            state.keys,
-            state.values,
-            cache=state.cache,
-            scale=self.scale,
-            mask=state.mask,
-        )
+        if getattr(state.cache, "bits", None) == 8:
+            output = dispatch_sdpa(
+                queries,
+                state.keys,
+                state.values,
+                cache=state.cache,
+                scale=self.scale,
+                mask=state.mask,
+                config=self.sdpa_config,
+            )
+        else:
+            output = scaled_dot_product_attention(
+                queries,
+                state.keys,
+                state.values,
+                cache=state.cache,
+                scale=self.scale,
+                mask=state.mask,
+            )
         if self.headwise_attn_output_gate:
             output = self._attention_output(x, output)
         else:

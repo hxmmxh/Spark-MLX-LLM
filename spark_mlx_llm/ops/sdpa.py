@@ -6,6 +6,8 @@ import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention
 
 from ..extension import get_extension
+from ..kv_cache import HadamardQuantizedKVCache, rotate_hadamard
+from . import _wide_kv8_sdpa
 from .base import OperatorConfig
 
 __all__ = ["SDPAConfig", "dispatch_sdpa"]
@@ -38,18 +40,49 @@ def dispatch_sdpa(
     config: SDPAConfig | None = None,
     is_sliding=False,
 ):
-    config = config if config is not None else SDPAConfig()
-    if config.fused_quantized_sdpa and _supports_int8(
+    rotated = isinstance(cache, HadamardQuantizedKVCache)
+    if rotated:
+        # Cache keys already contain RoPE followed by Hadamard. Apply the
+        # same transform to the post-RoPE query to preserve the dot product.
+        queries = rotate_hadamard(queries)
+    output = _dispatch_sdpa(
         queries,
         keys,
         values,
         cache=cache,
+        scale=scale,
         mask=mask,
-        prefill=config.fused_quantized_sdpa_prefill,
+        config=config,
+        is_sliding=is_sliding,
+    )
+    # Undo the value rotation after attention, before gating and projection.
+    return rotate_hadamard(output) if rotated else output
+
+
+def _dispatch_sdpa(queries, keys, values, *, cache, scale, mask, config, is_sliding):
+    config = config if config is not None else SDPAConfig()
+    if config.fused_quantized_sdpa and _supports_int8_shape(
+        queries, keys, values, cache=cache, mask=mask
     ):
-        return _int8_attention(
-            queries, keys, values, cache=cache, scale=scale, mask=mask
-        )
+        kv_heads = keys[0].shape[1]
+        gqa = queries.shape[1] // kv_heads
+        single_query = queries.shape[-2] == 1
+        if (
+            single_query
+            and gqa in (16, 32)
+            and keys[0].shape[2] >= 1024
+            and queries.dtype in (mx.bfloat16, mx.float16)
+            and _wide_kv8_sdpa.available()
+        ):
+            return _wide_kv8_sdpa.decode(queries, keys, values, scale)
+        if (
+            callable(int8_quantized_sdpa)
+            and gqa in (1, 2, 4, 8)
+            and (single_query or config.fused_quantized_sdpa_prefill)
+        ):
+            return _int8_attention(
+                queries, keys, values, cache=cache, scale=scale, mask=mask
+            )
     if (
         config.verification_bf16_sdpa
         and is_sliding
@@ -69,14 +102,12 @@ def dispatch_sdpa(
     return _native_attention(queries, keys, values, cache=cache, scale=scale, mask=mask)
 
 
-def _supports_int8(queries, keys, values, *, cache, mask, prefill=False):
+def _supports_int8_shape(queries, keys, values, *, cache, mask):
     return (
-        callable(int8_quantized_sdpa)
-        and getattr(cache, "bits", None) == 8
+        getattr(cache, "bits", None) == 8
         and getattr(cache, "group_size", None) == 32
         and queries.ndim == 4
         and queries.shape[-2] > 0
-        and (queries.shape[-2] == 1 or prefill)
         and queries.shape[-1] == 256
         and isinstance(keys, (tuple, list))
         and isinstance(values, (tuple, list))
@@ -85,7 +116,6 @@ def _supports_int8(queries, keys, values, *, cache, mask, prefill=False):
         and keys[0].shape[-1] == values[0].shape[-1] == 64
         and keys[0].shape[1] > 0
         and queries.shape[1] % keys[0].shape[1] == 0
-        and queries.shape[1] // keys[0].shape[1] in (1, 2, 4, 8)
         and queries.dtype in (mx.float16, mx.bfloat16, mx.float32)
         and all(x.dtype == queries.dtype for x in (*keys[1:], *values[1:]))
         and (mask is None or (isinstance(mask, str) and mask == "causal"))

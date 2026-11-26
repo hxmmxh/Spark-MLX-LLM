@@ -66,6 +66,7 @@ Python、生成/聊天 CLI 和 benchmark 使用 `GenerationConfig`；HTTP 保留
 | prefill_step_size | 自动选择。CED 尾部 prefill 用 2048，其余用 512 |
 | cache_limit_mib / clear_cache | 256 / false |
 | kv_bits / kv_group_size / quantized_kv_start / kv_quantization_scope | null / 32 / 0 / full-attention |
+| kv_hadamard | false。设为 true 时对 INT8 KV 使用 Hadamard 旋转 |
 | stop_at_eos / confidence_threshold | true / 0 |
 
 异步草稿和上下文仅在 GPU、随机采样及实际启用草稿时生效；草稿异步还要求未启用
@@ -80,6 +81,20 @@ KV 默认保留模型精度；量化 KV 需禁用草稿。`stop_at_eos=False` �
 Python 可用 `GenerationConfig.from_file()` 和 `.overlay({...})` 应用相同层次。
 Python 和生成 CLI 的未知字段、旧别名和错误类型立即报错；思考参数统一放顶层，
 `chat_template_kwargs` 仅用于额外模板参数。
+
+### Hadamard INT8 KV
+
+Spark2.5 和 Spark3 的文本生成可用 `GenerationConfig(kv_bits=8, kv_hadamard=True, max_draft_tokens=0)`
+启用旋转。CLI 可同时传入 `--kv-bits 8` 和 `--kv-hadamard`。
+
+```bash
+spark-mlx generate --model /path/to/model --no-use-draft \
+  --kv-bits 8 --kv-hadamard --prompt "你好"
+```
+
+全局层在首个达到 `quantized_kv_start` 的 prefill 分块或解码步结束时转换已有缓存。
+后续只旋转和量化新写入的 K/V。K 和 Q 在 RoPE 后使用相同的归一化 Hadamard 变换，
+attention 输出在门控和投影之前逆旋转。Spark3 的 CED 层复用生产者已量化的 K/V。
 
 ## 单一 CLI
 
@@ -144,15 +159,15 @@ dSpark 额外支持 `max_draft_tokens`、`draft_temperature`、`draft_top_p`、`
 
 HTTP 同时接受顶层 `enable_thinking`、`reasoning_effort` 和原有的
 `chat_template_kwargs` 思考参数；同一个请求中顶层值优先，均可覆盖服务默认值。
-HTTP 保留模型精度的 KV，不接受 `kv_bits`、`kv_group_size`、`quantized_kv_start`
-或 `kv_quantization_scope`：请求含这些字段时返回 400，服务 CLI 及 `--config` JSON
-显式提供这些字段时在加载模型前报错。Python API 和生成/聊天/benchmark CLI
+HTTP 保留模型精度的 KV，拒绝 `kv_bits`、`kv_hadamard`、`kv_group_size`、
+`quantized_kv_start` 和 `kv_quantization_scope`。请求含这些字段时返回 400。服务 CLI
+及 `--config` JSON 显式提供这些字段时在加载模型前报错。Python API 和生成/聊天/benchmark CLI
 仍支持 KV 量化；`--prefill-step-size` 继续作为服务启动选项使用。
 
 HTTP accepts top-level `enable_thinking` and `reasoning_effort` as well as the
 original `chat_template_kwargs`; top-level request values take precedence over
 nested values and server defaults. HTTP retains model-precision KV caches and
-rejects `kv_bits`, `kv_group_size`, `quantized_kv_start`, and
+rejects `kv_bits`, `kv_hadamard`, `kv_group_size`, `quantized_kv_start`, and
 `kv_quantization_scope` in requests (400), server CLI options, and config files.
 The Python API and generation/chat/benchmark CLI retain KV quantization support.
 `--prefill-step-size` remains a server startup option.
